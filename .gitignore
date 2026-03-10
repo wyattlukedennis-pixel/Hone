@@ -1,0 +1,23 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build artifacts
+dist/
+build/
+uploads/
+.expo/
+.expo-shared/
+
+# Env
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup

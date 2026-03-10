@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Hone",
+    "slug": "hone-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#f4efe6"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hone.mobile"
+    },
+    "android": {
+      "package": "com.hone.mobile"
+    }
+  }
+}
