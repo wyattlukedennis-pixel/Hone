@@ -1,0 +1,88 @@
+export function formatClipDay(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value.slice(0, 10);
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
+export function formatDurationMs(ms: number) {
+  return `${Math.max(1, Math.round(ms / 1000))}s`;
+}
+
+export function toJourneyErrorMessage(error: unknown) {
+  const raw = error instanceof Error ? error.message : "Unexpected error";
+  if (raw === "UNAUTHORIZED") return "Session expired. Please login again.";
+  if (raw === "TITLE_REQUIRED") return "Title is required.";
+  if (raw === "TITLE_TOO_LONG") return "Title must be 120 characters or fewer.";
+  if (raw === "JOURNEY_NOT_FOUND") return "Journey no longer exists.";
+  if (raw === "UPLOAD_NOT_READY") return "Upload is still processing. Please retry.";
+  if (raw.startsWith("Network request failed")) return raw;
+  return raw;
+}
+
+const dailyPrompts = [
+  "Today's focus: slow it down and keep your form clean.",
+  "Today's focus: smoother transitions between movements.",
+  "Today's focus: one clean take, not a perfect take.",
+  "Today's focus: repeat the hardest part three extra times.",
+  "Today's focus: relax your shoulders and breathe while practicing.",
+  "Today's focus: keep the same framing so progress is easier to see."
+];
+
+function pickLine(lines: string[], seed: number) {
+  if (!lines.length) return "";
+  const index = Math.abs(seed) % lines.length;
+  return lines[index];
+}
+
+export function buildHeroMessage(practicedToday: boolean, streak: number, dayCount: number) {
+  if (practicedToday) {
+    return pickLine(
+      [
+        "Nice work. You showed up today.",
+        "Momentum building. Keep this rhythm tomorrow.",
+        `Day ${Math.max(dayCount, 1)} is logged. Progress is building.`
+      ],
+      dayCount + streak
+    );
+  }
+
+  if (streak > 0) {
+    return pickLine(
+      [
+        `Show up today to protect your ${streak} Day Practice Streak.`,
+        "Small progress today keeps your momentum alive.",
+        "Consistency builds mastery. Record today's session."
+      ],
+      streak + dayCount
+    );
+  }
+
+  return pickLine(
+    [
+      "Show up today. Sharpen your skill.",
+      "Small progress today builds long-term mastery.",
+      "Your next clip is the next step forward."
+    ],
+    dayCount
+  );
+}
+
+export function buildSaveMessage(dayCount: number, streak: number, unlockedMilestoneTitle: string | null) {
+  if (unlockedMilestoneTitle) {
+    return `Nice. Day ${dayCount} recorded. ${unlockedMilestoneTitle} unlocked.`;
+  }
+  if (streak > 1) {
+    return `Nice. Day ${dayCount} recorded. ${streak} Day Practice Streak.`;
+  }
+  return `Nice. Day ${dayCount} recorded. Momentum building.`;
+}
+
+export function getTodayPrompt(dayCount: number, journeyId: string | null) {
+  const dayOfMonth = Number(new Date().toISOString().slice(8, 10)) || 1;
+  const seed = dayOfMonth + dayCount + (journeyId?.length ?? 0);
+  return pickLine(dailyPrompts, seed);
+}

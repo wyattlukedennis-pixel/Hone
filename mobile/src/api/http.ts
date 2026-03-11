@@ -25,11 +25,12 @@ async function parseApiError(response: Response) {
 
 export async function requestJson<T>(path: string, options: RequestOptions = {}) {
   const candidates = env.apiBaseUrlCandidates.length ? env.apiBaseUrlCandidates : [env.apiBaseUrl];
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json"
-  };
+  const headers: Record<string, string> = {};
   if (options.token) {
     headers.Authorization = `Bearer ${options.token}`;
+  }
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
   }
 
   for (const baseUrl of candidates) {

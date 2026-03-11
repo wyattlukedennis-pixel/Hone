@@ -6,6 +6,8 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { trackEvent } from "./analytics/events";
 import { fetchMe, login, logout, signup } from "./api/auth";
+import { clearJourneyClips } from "./api/clips";
+import { listJourneys } from "./api/journeys";
 import { GlassSurface } from "./components/GlassSurface";
 import { TabBar } from "./components/TabBar";
 import { env } from "./env";
@@ -15,8 +17,10 @@ import { ProgressScreen } from "./screens/ProgressScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { clearActiveJourneyId, readActiveJourneyId, saveActiveJourneyId } from "./storage/activeJourneyStorage";
 import { clearAuthToken, readAuthToken, saveAuthToken } from "./storage/authStorage";
+import { readDevDateShiftSettings, saveDevDateShiftSettings } from "./storage/devToolsStorage";
 import { theme } from "./theme";
 import type { AuthMode, User } from "./types/auth";
+import { defaultDevDateShiftSettings, type DevDateShiftSettings } from "./types/devTools";
 import type { TabKey } from "./types/navigation";
 
 type SessionState = {
@@ -56,6 +60,8 @@ export default function App() {
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [tab, setTab] = useState<TabKey>("journeys");
   const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
+  const [devDateShiftSettings, setDevDateShiftSettings] = useState<DevDateShiftSettings>(defaultDevDateShiftSettings);
+  const [recordingsRevision, setRecordingsRevision] = useState(0);
   const screenOpacity = useRef(new Animated.Value(1)).current;
   const screenTranslateY = useRef(new Animated.Value(0)).current;
   const screenScale = useRef(new Animated.Value(1)).current;
@@ -64,8 +70,13 @@ export default function App() {
     trackEvent("app_opened", { appEnv: env.appEnv });
     async function bootstrapAuth() {
       try {
-        const [token, storedJourneyId] = await Promise.all([readAuthToken(), readActiveJourneyId()]);
+        const [token, storedJourneyId, storedDevDateShift] = await Promise.all([
+          readAuthToken(),
+          readActiveJourneyId(),
+          __DEV__ ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings)
+        ]);
         if (storedJourneyId) setActiveJourneyId(storedJourneyId);
+        if (__DEV__) setDevDateShiftSettings(storedDevDateShift);
         if (!token) return;
 
         const me = await fetchMe(token);
@@ -169,6 +180,77 @@ export default function App() {
     }
   }
 
+  async function handleClearAllRecordings() {
+    if (!session) return { success: false, message: "Not signed in." };
+    try {
+      const journeysResponse = await listJourneys(session.token);
+      if (!journeysResponse.journeys.length) {
+        return { success: true, message: "No journeys to clear." };
+      }
+
+      const deletionResults = await Promise.all(
+        journeysResponse.journeys.map(async (journey) => {
+          try {
+            const result = await clearJourneyClips(session.token, journey.id);
+            return {
+              journeyId: journey.id,
+              title: journey.title,
+              success: Boolean(result.success),
+              deletedCount: result.deletedCount ?? 0,
+              error: null as string | null
+            };
+          } catch (error) {
+            return {
+              journeyId: journey.id,
+              title: journey.title,
+              success: false,
+              deletedCount: 0,
+              error: error instanceof Error ? error.message : "Unexpected error"
+            };
+          }
+        })
+      );
+      const deletedCount = deletionResults.reduce((sum, item) => sum + (item.deletedCount ?? 0), 0);
+      const failed = deletionResults.filter((item) => item.success === false);
+      const failedCount = failed.length;
+      trackEvent("clips_cleared", { deletedCount, journeys: journeysResponse.journeys.length, source: "dev_tools" });
+      if (failedCount > 0) {
+        const endpointMissing = failed.every((item) => item.error === "HTTP_404");
+        if (endpointMissing) {
+          return {
+            success: false,
+            message: "Clear endpoint missing (HTTP_404). Restart backend so new routes load."
+          };
+        }
+
+        const failurePreview = failed
+          .slice(0, 2)
+          .map((item) => `${item.title}: ${item.error ?? "Unknown error"}`)
+          .join(" | ");
+        return {
+          success: false,
+          message: `Cleared ${deletedCount} recordings. ${failedCount} journey${failedCount === 1 ? "" : "s"} failed. ${failurePreview}`
+        };
+      }
+      setRecordingsRevision((value) => value + 1);
+      return {
+        success: true,
+        message: `Cleared ${deletedCount} recording${deletedCount === 1 ? "" : "s"} across ${journeysResponse.journeys.length} journey${
+          journeysResponse.journeys.length === 1 ? "" : "s"
+        }.`
+      };
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "Unexpected error";
+      return { success: false, message: `Failed to clear recordings: ${raw}` };
+    }
+  }
+
+  async function handleDevDateShiftSettingsChange(next: DevDateShiftSettings) {
+    setDevDateShiftSettings(next);
+    if (!__DEV__) return;
+    await saveDevDateShiftSettings(next);
+  }
+
   const content = useMemo(() => {
     if (tab === "journeys") {
       return session ? (
@@ -182,6 +264,11 @@ export default function App() {
             void handleActiveJourneyChange(journeyId);
             setTab("progress");
           }}
+          devDateShiftSettings={devDateShiftSettings}
+          onDevDateShiftSettingsChange={(next) => {
+            void handleDevDateShiftSettingsChange(next);
+          }}
+          recordingsRevision={recordingsRevision}
         />
       ) : null;
     }
@@ -194,11 +281,24 @@ export default function App() {
             void handleActiveJourneyChange(journeyId);
           }}
           onOpenJourneysTab={() => setTab("journeys")}
+          devNowDayOffset={devDateShiftSettings.enabled ? devDateShiftSettings.dayOffset : 0}
+          recordingsRevision={recordingsRevision}
         />
       ) : null;
     }
-    return session ? <SettingsScreen user={session.user} onLogout={handleLogout} loggingOut={logoutLoading} /> : null;
-  }, [tab, session, logoutLoading, activeJourneyId]);
+    return session ? (
+      <SettingsScreen
+        user={session.user}
+        onLogout={handleLogout}
+        loggingOut={logoutLoading}
+        devDateShiftSettings={__DEV__ ? devDateShiftSettings : null}
+        onDevDateShiftSettingsChange={(next) => {
+          void handleDevDateShiftSettingsChange(next);
+        }}
+        onClearAllRecordings={handleClearAllRecordings}
+      />
+    ) : null;
+  }, [tab, session, logoutLoading, activeJourneyId, devDateShiftSettings, recordingsRevision]);
 
   return (
     <SafeAreaProvider>

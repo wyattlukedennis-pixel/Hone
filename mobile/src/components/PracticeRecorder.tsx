@@ -175,7 +175,7 @@ export function PracticeRecorder({
           ) : null}
           {referenceClipUrl && cameraMounted && !captured && showReferenceGuide ? (
             <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              <Video source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} isMuted resizeMode={ResizeMode.COVER} />
+              <Video source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} shouldPlay isLooping isMuted resizeMode={ResizeMode.COVER} />
               <View style={styles.referenceOverlayMask} />
             </View>
           ) : null}

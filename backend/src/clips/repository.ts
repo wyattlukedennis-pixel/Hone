@@ -167,3 +167,15 @@ export async function listClipsForJourney(pool: Pool, journeyId: string) {
 
   return result.rows.map(mapClip);
 }
+
+export async function deleteClipsForJourney(pool: Pool, journeyId: string) {
+  const result = await pool.query(
+    `
+      DELETE FROM clips
+      WHERE journey_id = $1
+    `,
+    [journeyId]
+  );
+
+  return result.rowCount ?? 0;
+}

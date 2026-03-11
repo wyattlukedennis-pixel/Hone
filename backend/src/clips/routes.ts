@@ -12,6 +12,7 @@ import { getPool } from "../db/pool.js";
 import { findJourneyByIdForUser } from "../journeys/repository.js";
 import {
   createClipUpload,
+  deleteClipsForJourney,
   findClipUploadById,
   listClipsForJourney,
   markClipUploadUploaded,
@@ -171,5 +172,20 @@ export function registerClipRoutes(app: FastifyInstance) {
 
     const clips = await listClipsForJourney(pool, journey.id);
     return reply.send({ clips });
+  });
+
+  app.delete<{ Params: JourneyParams }>("/journeys/:journeyId/clips", async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+
+    const pool = getPool();
+    const journey = await findJourneyByIdForUser(pool, {
+      journeyId: request.params.journeyId,
+      userId: auth.user.id
+    });
+    if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
+
+    const deletedCount = await deleteClipsForJourney(pool, journey.id);
+    return reply.send({ success: true, deletedCount });
   });
 }

@@ -133,3 +133,10 @@ export async function listClips(token: string, journeyId: string) {
     clips: response.clips.map((clip) => normalizeClipMediaUrl(clip))
   };
 }
+
+export function clearJourneyClips(token: string, journeyId: string) {
+  return requestJson<{ success: boolean; deletedCount: number }>(`/journeys/${journeyId}/clips`, {
+    token,
+    method: "DELETE"
+  });
+}
