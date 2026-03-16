@@ -1,5 +1,5 @@
 import { requestJson } from "./http";
-import type { JourneyResponse, JourneysResponse } from "../types/journey";
+import type { JourneyResponse, JourneysResponse, JourneyRevealsResponse, NextMilestoneResponse } from "../types/journey";
 
 export function listJourneys(token: string) {
   return requestJson<JourneysResponse>("/journeys", { token });
@@ -7,7 +7,14 @@ export function listJourneys(token: string) {
 
 export function createJourney(
   token: string,
-  payload: { title: string; category?: string | null; colorTheme?: string | null; goalText?: string | null }
+  payload: {
+    title: string;
+    category?: string | null;
+    colorTheme?: string | null;
+    goalText?: string | null;
+    captureMode?: "video" | "photo";
+    milestoneLengthDays?: number;
+  }
 ) {
   return requestJson<JourneyResponse>("/journeys", {
     token,
@@ -19,7 +26,14 @@ export function createJourney(
 export function updateJourney(
   token: string,
   journeyId: string,
-  payload: { title?: string; category?: string | null; colorTheme?: string | null; goalText?: string | null }
+  payload: {
+    title?: string;
+    category?: string | null;
+    colorTheme?: string | null;
+    goalText?: string | null;
+    captureMode?: "video" | "photo";
+    milestoneLengthDays?: number;
+  }
 ) {
   return requestJson<JourneyResponse>(`/journeys/${journeyId}`, {
     token,
@@ -34,3 +48,18 @@ export function archiveJourney(token: string, journeyId: string) {
     method: "DELETE"
   });
 }
+
+export function listJourneyReveals(token: string, journeyId: string) {
+  return requestJson<JourneyRevealsResponse>(`/journeys/${journeyId}/reveals`, {
+    token
+  });
+}
+
+export function startNextMilestone(token: string, journeyId: string, milestoneLengthDays: number) {
+  return requestJson<NextMilestoneResponse>(`/journeys/${journeyId}/next-milestone`, {
+    token,
+    method: "POST",
+    body: { milestoneLengthDays }
+  });
+}
+

@@ -1,0 +1,6 @@
+export const PRACTICE_MODAL_BACKDROP = "rgba(10,19,33,0.32)";
+export const PRACTICE_MODAL_RADIUS = 24;
+export const PRACTICE_MODAL_PADDING = 14;
+export const PRACTICE_MODAL_EDGE_PADDING = 12;
+export const PRACTICE_MODAL_DONE_BORDER = "rgba(255,255,255,0.72)";
+export const PRACTICE_MODAL_DONE_FILL = "rgba(255,255,255,0.34)";

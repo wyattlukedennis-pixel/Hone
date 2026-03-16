@@ -1,496 +1,491 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { ResizeMode, Video } from "expo-av";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { trackEvent } from "../analytics/events";
-import { createClip, listClips, requestClipUploadUrl, uploadClipFile } from "../api/clips";
-import { archiveJourney, createJourney, listJourneys } from "../api/journeys";
+import { motionTokens } from "../motion/tokens";
 import { PracticeRecorder } from "../components/PracticeRecorder";
+import { TactilePressable } from "../components/TactilePressable";
 import { theme } from "../theme";
-import type { Clip } from "../types/clip";
+import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
-import type { Journey } from "../types/journey";
-import { getCurrentStreak, getDayCount, getNextMilestone, getUnlockedMilestone, hasClipToday } from "../utils/progress";
+import { getDailyMomentKey, isInDailyMomentWindow } from "../utils/dailyMoment";
+import { useReducedMotion } from "../utils/useReducedMotion";
 import { ActionButton } from "./practice/ActionButton";
-import { ClipViewerModal } from "./practice/ClipViewerModal";
-import { buildHeroMessage, buildSaveMessage, getTodayPrompt, toJourneyErrorMessage } from "./practice/helpers";
 import { ManageJourneysModal } from "./practice/ManageJourneysModal";
-import { PracticeHeroCard } from "./practice/PracticeHeroCard";
-import { PracticeProgressPreviewCard } from "./practice/PracticeProgressPreviewCard";
-import { TimelineModal } from "./practice/TimelineModal";
+import { PracticeCalendarMini } from "./practice/PracticeCalendarMini";
+import { usePracticeState } from "./practice/usePracticeState";
 
 type JourneysScreenProps = {
   token: string;
   activeJourneyId: string | null;
+  mediaMode: "video" | "photo";
   onActiveJourneyChange: (journeyId: string | null) => void;
-  onOpenProgress: (journeyId: string) => void;
+  onOpenProgress: (journeyId: string, options?: { openReveal?: boolean }) => void;
   devDateShiftSettings: DevDateShiftSettings;
   onDevDateShiftSettingsChange: (next: DevDateShiftSettings) => void;
+  dailyMomentSettings: DailyMomentSettings;
+  openRecorderSignal: number;
   recordingsRevision: number;
 };
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-
-function applyDayOffset(value: string, dayOffset: number) {
-  if (!dayOffset) return value;
-  const base = new Date(value);
-  if (Number.isNaN(base.getTime())) return value;
-  base.setDate(base.getDate() + dayOffset);
-  return base.toISOString();
-}
 
 export function JourneysScreen({
   token,
   activeJourneyId,
+  mediaMode,
   onActiveJourneyChange,
   onOpenProgress,
   devDateShiftSettings,
   onDevDateShiftSettingsChange,
+  dailyMomentSettings,
+  openRecorderSignal,
   recordingsRevision
 }: JourneysScreenProps) {
-  const [journeys, setJourneys] = useState<Journey[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [manageOpen, setManageOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [newTitle, setNewTitle] = useState("");
-  const [newCategory, setNewCategory] = useState("");
-  const [newGoalText, setNewGoalText] = useState("");
-
-  const [clipsByJourney, setClipsByJourney] = useState<Record<string, Clip[]>>({});
-  const [clipsLoadingByJourney, setClipsLoadingByJourney] = useState<Record<string, boolean>>({});
-  const [activeClip, setActiveClip] = useState<Clip | null>(null);
-
-  const [recorderJourneyId, setRecorderJourneyId] = useState<string | null>(null);
-  const [clipSaving, setClipSaving] = useState(false);
-  const [recorderStatusMessage, setRecorderStatusMessage] = useState<string | null>(null);
-  const [timelineOpen, setTimelineOpen] = useState(false);
-
-  const [celebrationText, setCelebrationText] = useState<string | null>(null);
-  const [recentlySavedClipId, setRecentlySavedClipId] = useState<string | null>(null);
-  const [recentlyFilledDotIndex, setRecentlyFilledDotIndex] = useState<number | null>(null);
-  const [milestoneFlash, setMilestoneFlash] = useState(false);
-
-  const celebrationOpacity = useRef(new Animated.Value(0)).current;
-  const celebrationY = useRef(new Animated.Value(14)).current;
-  const statPulse = useRef(new Animated.Value(1)).current;
-  const newestClipReveal = useRef(new Animated.Value(1)).current;
-  const dotFillProgress = useRef(new Animated.Value(1)).current;
-  const milestonePulse = useRef(new Animated.Value(1)).current;
-
-  const saveFlightOpacity = useRef(new Animated.Value(0)).current;
-  const saveFlightX = useRef(new Animated.Value(0)).current;
-  const saveFlightY = useRef(new Animated.Value(0)).current;
-  const saveFlightScale = useRef(new Animated.Value(1)).current;
-  const [saveFlightClipUrl, setSaveFlightClipUrl] = useState<string | null>(null);
-
-  function playCelebration(message: string) {
-    setCelebrationText(message);
-    celebrationOpacity.setValue(0);
-    celebrationY.setValue(14);
-    Animated.sequence([
-      Animated.parallel([
-        Animated.timing(celebrationOpacity, { toValue: 1, duration: 180, useNativeDriver: true }),
-        Animated.timing(celebrationY, { toValue: 0, duration: 180, useNativeDriver: true })
-      ]),
-      Animated.delay(1200),
-      Animated.parallel([
-        Animated.timing(celebrationOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
-        Animated.timing(celebrationY, { toValue: -8, duration: 220, useNativeDriver: true })
-      ])
-    ]).start(() => {
-      setCelebrationText(null);
-    });
-  }
-
-  function playSaveMotion(filledDotIndex: number, unlockedMilestone: boolean, clipUrl: string | null) {
-    setRecentlyFilledDotIndex(filledDotIndex);
-    dotFillProgress.setValue(0);
-    newestClipReveal.setValue(0);
-    statPulse.setValue(0.94);
-
-    Animated.parallel([
-      Animated.timing(dotFillProgress, {
-        toValue: 1,
-        duration: 520,
-        useNativeDriver: true
-      }),
-      Animated.timing(newestClipReveal, {
-        toValue: 1,
-        duration: 420,
-        useNativeDriver: true
-      }),
-      Animated.sequence([
-        Animated.timing(statPulse, {
-          toValue: 1.06,
-          duration: 180,
-          useNativeDriver: true
-        }),
-        Animated.timing(statPulse, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true
-        })
-      ])
-    ]).start();
-
-    if (clipUrl) {
-      setSaveFlightClipUrl(clipUrl);
-      saveFlightOpacity.setValue(0.98);
-      saveFlightX.setValue(0);
-      saveFlightY.setValue(0);
-      saveFlightScale.setValue(1.05);
-
-      Animated.parallel([
-        Animated.timing(saveFlightX, {
-          toValue: Math.max(112, SCREEN_WIDTH * 0.34),
-          duration: 420,
-          useNativeDriver: true
-        }),
-        Animated.timing(saveFlightY, {
-          toValue: -Math.max(210, SCREEN_HEIGHT * 0.32),
-          duration: 420,
-          useNativeDriver: true
-        }),
-        Animated.timing(saveFlightScale, {
-          toValue: 0.35,
-          duration: 420,
-          useNativeDriver: true
-        }),
-        Animated.sequence([
-          Animated.delay(260),
-          Animated.timing(saveFlightOpacity, {
-            toValue: 0,
-            duration: 190,
-            useNativeDriver: true
-          })
-        ])
-      ]).start(() => {
-        setSaveFlightClipUrl(null);
-      });
-    }
-
-    if (unlockedMilestone) {
-      setMilestoneFlash(true);
-      milestonePulse.setValue(0.96);
-      Animated.sequence([
-        Animated.timing(milestonePulse, {
-          toValue: 1.05,
-          duration: 220,
-          useNativeDriver: true
-        }),
-        Animated.timing(milestonePulse, {
-          toValue: 1,
-          duration: 220,
-          useNativeDriver: true
-        })
-      ]).start(() => {
-        setMilestoneFlash(false);
-      });
-    }
-  }
-
-  async function loadJourneys({ silent = false }: { silent?: boolean } = {}) {
-    if (silent) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setErrorMessage(null);
-
-    try {
-      const response = await listJourneys(token);
-      setJourneys(response.journeys);
-      if (response.journeys.length === 0) {
-        onActiveJourneyChange(null);
-      } else {
-        const activeStillExists = Boolean(activeJourneyId) && response.journeys.some((journey) => journey.id === activeJourneyId);
-        if (!activeStillExists) {
-          onActiveJourneyChange(response.journeys[0].id);
-        }
-      }
-    } catch (error) {
-      setErrorMessage(toJourneyErrorMessage(error));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  async function loadJourneyClips(journeyId: string) {
-    setClipsLoadingByJourney((current) => ({ ...current, [journeyId]: true }));
-    setErrorMessage(null);
-    try {
-      const response = await listClips(token, journeyId);
-      setClipsByJourney((current) => ({ ...current, [journeyId]: response.clips }));
-      return response.clips;
-    } catch (error) {
-      setErrorMessage(toJourneyErrorMessage(error));
-      return [] as Clip[];
-    } finally {
-      setClipsLoadingByJourney((current) => ({ ...current, [journeyId]: false }));
-    }
-  }
+  const reducedMotion = useReducedMotion();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const [clockTick, setClockTick] = useState(Date.now());
+  const streakTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heroSectionReveal = useRef(new Animated.Value(0)).current;
+  const previewSectionReveal = useRef(new Animated.Value(0)).current;
+  const {
+    journeys,
+    loading,
+    refreshing,
+    creating,
+    updatingId,
+    manageOpen,
+    setManageOpen,
+    errorMessage,
+    statusMessage,
+    newTitle,
+    setNewTitle,
+    newCategory,
+    setNewCategory,
+    newGoalText,
+    setNewGoalText,
+    newMilestoneLengthDays,
+    setNewMilestoneLengthDays,
+    newCaptureMode,
+    setNewCaptureMode,
+    clipsByJourney,
+    recorderJourneyId,
+    setRecorderJourneyId,
+    clipSaving,
+    recorderStatusMessage,
+    setRecorderStatusMessage,
+    statPulse,
+    celebration,
+    celebrationOpacity,
+    celebrationY,
+    saveFlightOpacity,
+    saveFlightX,
+    saveFlightY,
+    saveFlightScale,
+    saveFlightClipUrl,
+    loadJourneys,
+    loadJourneyClips,
+    handleCreateJourney,
+    handleArchiveJourney,
+    handleSaveRecordedClip,
+    activeJourney,
+    activeStreak,
+    practicedToday,
+    milestoneProgress,
+    activeJourneyClips,
+    recorderJourney,
+    recorderCaptureType,
+    recorderDay,
+    recorderReferenceClipUrl
+  } = usePracticeState({
+    token,
+    activeJourneyId,
+    onActiveJourneyChange,
+    mediaMode,
+    devDateShiftSettings,
+    onDevDateShiftSettingsChange,
+    recordingsRevision
+  });
 
   useEffect(() => {
-    void loadJourneys();
-  }, [token]);
+    const timer = setInterval(() => {
+      setClockTick(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
-  useEffect(() => {
-    setClipsByJourney({});
-    setClipsLoadingByJourney({});
-    if (activeJourneyId) {
-      void loadJourneyClips(activeJourneyId);
+  const now = useMemo(() => {
+    const value = new Date();
+    if (devDateShiftSettings.enabled && devDateShiftSettings.dayOffset) {
+      value.setDate(value.getDate() + devDateShiftSettings.dayOffset);
     }
-  }, [recordingsRevision]);
+    return value;
+  }, [clockTick, devDateShiftSettings.enabled, devDateShiftSettings.dayOffset]);
+  const dailyMomentWindowOpen = isInDailyMomentWindow(now, dailyMomentSettings);
+  const tabBarReserve = 90;
+  const availableHeight = windowHeight - insets.top - insets.bottom - tabBarReserve;
+  const normalizedStreak = Math.max(activeStreak, 0);
+  const chapterTargetDays = milestoneProgress?.milestoneLengthDays ?? activeJourney?.milestoneLengthDays ?? 7;
+  const chapterProgressDays = milestoneProgress?.progressDays ?? 0;
+  const chapterRemainingDays = milestoneProgress?.remainingDays ?? chapterTargetDays;
+  const chapterRevealReady = Boolean(milestoneProgress?.reachedReveal);
+  const chapterNumber = milestoneProgress?.milestoneChapter ?? activeJourney?.milestoneChapter ?? 1;
+  const chapterDisplayDay = chapterRevealReady
+    ? chapterTargetDays
+    : Math.max(1, Math.min(chapterTargetDays, chapterProgressDays + (practicedToday ? 0 : 1)));
+  const chapterCountdownLabel = chapterRevealReady
+    ? "Your reveal is ready."
+    : `${chapterRemainingDays} ${chapterRemainingDays === 1 ? "practice" : "practices"} until reveal`;
+  const criticalMode = availableHeight < 560;
+  const ultraCompactMode = availableHeight < 680;
+  const tightMode = availableHeight < 700;
+  const compactMode = availableHeight < 760;
+  const revealFocusMode = chapterRevealReady;
+  const headingScale = availableHeight >= 860 ? 1.02 : availableHeight >= 760 ? 0.98 : availableHeight >= 700 ? 0.93 : 0.88;
+  const effectiveHeadingScale = revealFocusMode ? headingScale * 0.92 : headingScale;
+  const skillNameSize = Math.round(23 * effectiveHeadingScale);
+  const dayLineSize = Math.round(17 * effectiveHeadingScale);
+  const streakLineSize = Math.round(13 * effectiveHeadingScale);
+  const sceneHorizontalPadding = criticalMode ? 14 : 20;
+  const sceneTopPadding = criticalMode ? 2 : ultraCompactMode ? 6 : 10;
+  const sceneBottomPadding = Math.max(insets.bottom + 112, 124);
+  const scenePrimaryDense = compactMode || criticalMode;
+  const sceneCalendarCompact = criticalMode || availableHeight < 700;
+  const [displayStreak, setDisplayStreak] = useState(normalizedStreak);
+  const displayStreakRef = useRef(normalizedStreak);
+  const countersBootstrappedRef = useRef(false);
+  const autoOpenedMomentKeyRef = useRef<string | null>(null);
+  const handledNotificationSignalRef = useRef(0);
 
-  useEffect(() => {
-    if (!activeJourneyId) return;
-    const hasClips = Boolean(clipsByJourney[activeJourneyId]);
-    const loadingClips = Boolean(clipsLoadingByJourney[activeJourneyId]);
-    if (!hasClips && !loadingClips) {
-      void loadJourneyClips(activeJourneyId);
+  function animateCounter(
+    valueRef: { current: number },
+    timerRef: { current: ReturnType<typeof setInterval> | null },
+    target: number,
+    setter: (next: number) => void
+  ) {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
-  }, [activeJourneyId, clipsByJourney, clipsLoadingByJourney]);
 
-  async function handleCreateJourney() {
-    const title = newTitle.trim();
-    if (!title) {
-      setErrorMessage("Title is required.");
+    const start = valueRef.current;
+    if (target <= start || target - start > 6) {
+      valueRef.current = target;
+      setter(target);
       return;
     }
 
-    setCreating(true);
-    setErrorMessage(null);
-    setStatusMessage(null);
-    try {
-      const response = await createJourney(token, {
-        title,
-        category: newCategory.trim() || null,
-        goalText: newGoalText.trim() || null
-      });
-      setJourneys((current) => [response.journey, ...current]);
-      onActiveJourneyChange(response.journey.id);
-      setManageOpen(false);
-      setNewTitle("");
-      setNewCategory("");
-      setNewGoalText("");
-      setStatusMessage("Journey started. Day 1 is ready.");
-    } catch (error) {
-      setErrorMessage(toJourneyErrorMessage(error));
-    } finally {
-      setCreating(false);
-    }
+    const steps = target - start;
+    const stepDuration = Math.max(36, Math.floor(260 / steps));
+    timerRef.current = setInterval(() => {
+      const next = valueRef.current + 1;
+      valueRef.current = next;
+      setter(next);
+      if (next >= target) {
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }, stepDuration);
   }
 
-  async function handleArchiveJourney(journeyId: string) {
-    setUpdatingId(journeyId);
-    setErrorMessage(null);
-    setStatusMessage(null);
-    try {
-      await archiveJourney(token, journeyId);
-      const remainingJourneys = journeys.filter((journey) => journey.id !== journeyId);
-      setJourneys(remainingJourneys);
-      setClipsByJourney((current) => {
-        const next = { ...current };
-        delete next[journeyId];
-        return next;
-      });
-      if (activeJourneyId === journeyId) {
-        onActiveJourneyChange(remainingJourneys[0]?.id ?? null);
-      }
-      setStatusMessage("Journey archived.");
-    } catch (error) {
-      setErrorMessage(toJourneyErrorMessage(error));
-    } finally {
-      setUpdatingId(null);
+  useEffect(() => {
+    if (!activeJourney) return;
+    if (!dailyMomentSettings.enabled || !dailyMomentSettings.autoOpenRecorder) return;
+    if (!dailyMomentWindowOpen) return;
+    if (practicedToday) return;
+    if (recorderJourneyId) return;
+    if (loading) return;
+
+    const key = `${activeJourney.id}:${getDailyMomentKey(now)}`;
+    if (autoOpenedMomentKeyRef.current === key) return;
+    autoOpenedMomentKeyRef.current = key;
+    trackEvent("daily_moment_prompted", { journeyId: activeJourney.id, source: "auto_open" });
+    setRecorderJourneyId(activeJourney.id);
+  }, [
+    activeJourney?.id,
+    dailyMomentSettings.enabled,
+    dailyMomentSettings.autoOpenRecorder,
+    dailyMomentWindowOpen,
+    practicedToday,
+    recorderJourneyId,
+    loading,
+    now
+  ]);
+
+  useEffect(() => {
+    if (!openRecorderSignal) return;
+    if (openRecorderSignal <= handledNotificationSignalRef.current) return;
+    if (!activeJourney) return;
+    handledNotificationSignalRef.current = openRecorderSignal;
+    if (recorderJourneyId) return;
+    setRecorderJourneyId(activeJourney.id);
+    trackEvent("record_tapped", { journeyId: activeJourney.id, context: "daily_moment_notification" });
+  }, [openRecorderSignal, activeJourney?.id, recorderJourneyId]);
+
+  useEffect(() => {
+    if (!countersBootstrappedRef.current) {
+      countersBootstrappedRef.current = true;
+      displayStreakRef.current = normalizedStreak;
+      setDisplayStreak(normalizedStreak);
+      return;
     }
+
+    if (reducedMotion) {
+      displayStreakRef.current = normalizedStreak;
+      setDisplayStreak(normalizedStreak);
+      return;
+    }
+
+    animateCounter(displayStreakRef, streakTimerRef, normalizedStreak, setDisplayStreak);
+  }, [normalizedStreak, reducedMotion]);
+
+  useEffect(() => {
+    return () => {
+      if (streakTimerRef.current) clearInterval(streakTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeJourney) {
+      heroSectionReveal.setValue(0);
+      previewSectionReveal.setValue(0);
+      return;
+    }
+
+    if (reducedMotion) {
+      heroSectionReveal.setValue(1);
+      previewSectionReveal.setValue(1);
+      return;
+    }
+
+    heroSectionReveal.setValue(0);
+    previewSectionReveal.setValue(0);
+    Animated.stagger(motionTokens.sectionStaggerMs, [
+      Animated.timing(heroSectionReveal, {
+        toValue: 1,
+        duration: theme.motion.transitionMs + motionTokens.durationOffset.sectionIn,
+        easing: motionTokens.easing.outCubic,
+        useNativeDriver: true
+      }),
+      Animated.timing(previewSectionReveal, {
+        toValue: 1,
+        duration: theme.motion.transitionMs + motionTokens.durationOffset.sectionInLight,
+        easing: motionTokens.easing.outCubic,
+        useNativeDriver: true
+      })
+    ]).start();
+  }, [activeJourney?.id, reducedMotion, heroSectionReveal, previewSectionReveal]);
+
+  function handlePrimaryAction() {
+    if (!activeJourney) return;
+    if (chapterRevealReady) {
+      trackEvent("milestone_reveal_opened", {
+        journeyId: activeJourney.id,
+        chapter: milestoneProgress?.milestoneChapter ?? activeJourney.milestoneChapter,
+        source: "practice_primary"
+      });
+      onOpenProgress(activeJourney.id, { openReveal: true });
+      return;
+    }
+    trackEvent("record_tapped", { journeyId: activeJourney.id, context: "practice_primary" });
+    setRecorderJourneyId(activeJourney.id);
   }
-
-  async function handleSaveRecordedClip(payload: {
-    uri: string;
-    durationMs: number;
-    recordedAt: string;
-  }): Promise<{ success: boolean; errorMessage?: string }> {
-    if (!recorderJourneyId) {
-      return { success: false, errorMessage: "No journey selected." };
-    }
-
-    setClipSaving(true);
-    setErrorMessage(null);
-    setStatusMessage(null);
-    setRecorderStatusMessage("Requesting upload URL...");
-    try {
-      const upload = await requestClipUploadUrl(token, recorderJourneyId, {
-        mimeType: "video/mp4",
-        fileExtension: "mp4"
-      });
-
-      setRecorderStatusMessage("Uploading clip...");
-      await uploadClipFile({
-        token,
-        uploadUrl: upload.uploadUrl,
-        fileField: upload.fileField,
-        fileUri: payload.uri,
-        mimeType: "video/mp4"
-      });
-
-      setRecorderStatusMessage("Finalizing timeline...");
-      const dayOffset = devDateShiftSettings.enabled ? devDateShiftSettings.dayOffset : 0;
-      const effectiveRecordedAt = applyDayOffset(payload.recordedAt, dayOffset);
-
-      await createClip(token, recorderJourneyId, {
-        uploadId: upload.uploadId,
-        durationMs: payload.durationMs,
-        recordedAt: effectiveRecordedAt
-      });
-
-      const refreshed = await loadJourneyClips(recorderJourneyId);
-      const dayCount = getDayCount(refreshed);
-      const streak = getCurrentStreak(refreshed);
-      const unlockedMilestone = getUnlockedMilestone(dayCount);
-      const newestClip = refreshed[0] ?? null;
-
-      onActiveJourneyChange(recorderJourneyId);
-      const message = buildSaveMessage(dayCount, streak, unlockedMilestone?.title ?? null);
-
-      trackEvent("clip_saved", { journeyId: recorderJourneyId, dayCount, streak });
-      if (unlockedMilestone) {
-        trackEvent("milestone_unlocked", {
-          journeyId: recorderJourneyId,
-          day: unlockedMilestone.day,
-          title: unlockedMilestone.title
-        });
-      }
-
-      if (newestClip) setRecentlySavedClipId(newestClip.id);
-      playSaveMotion(Math.min(6, Math.max(0, dayCount - 1)), Boolean(unlockedMilestone), newestClip?.videoUrl ?? null);
-      setStatusMessage(message);
-      playCelebration(message);
-
-      if (devDateShiftSettings.enabled && devDateShiftSettings.autoAdvanceAfterSave) {
-        void onDevDateShiftSettingsChange({
-          ...devDateShiftSettings,
-          dayOffset: devDateShiftSettings.dayOffset + 1
-        });
-      }
-
-      setRecorderJourneyId(null);
-      setRecorderStatusMessage(null);
-      return { success: true };
-    } catch (error) {
-      const message = toJourneyErrorMessage(error);
-      setErrorMessage(message);
-      setRecorderStatusMessage(null);
-      console.error("clip save failed", error);
-      return { success: false, errorMessage: message };
-    } finally {
-      setClipSaving(false);
-    }
-  }
-
-  const activeJourney = useMemo(
-    () => (activeJourneyId ? journeys.find((journey) => journey.id === activeJourneyId) ?? null : null),
-    [journeys, activeJourneyId]
-  );
-
-  const effectiveNow = useMemo(() => {
-    if (!devDateShiftSettings.enabled || !devDateShiftSettings.dayOffset) return new Date();
-    const next = new Date();
-    next.setDate(next.getDate() + devDateShiftSettings.dayOffset);
-    return next;
-  }, [devDateShiftSettings.enabled, devDateShiftSettings.dayOffset]);
-
-  const activeJourneyClips = activeJourney ? clipsByJourney[activeJourney.id] ?? [] : [];
-  const clipsLoading = activeJourney ? Boolean(clipsLoadingByJourney[activeJourney.id]) : false;
-  const activeDayCount = getDayCount(activeJourneyClips);
-  const activeStreak = getCurrentStreak(activeJourneyClips, effectiveNow);
-  const practicedToday = hasClipToday(activeJourneyClips, effectiveNow);
-  const nextMilestone = getNextMilestone(activeDayCount);
-  const practiceDots = Math.min(7, activeDayCount);
-
-  const recorderJourney = recorderJourneyId ? journeys.find((journey) => journey.id === recorderJourneyId) ?? null : null;
-  const recorderClips = recorderJourney ? clipsByJourney[recorderJourney.id] ?? [] : [];
-  const recorderDay = Math.max(1, getDayCount(recorderClips) + (hasClipToday(recorderClips, effectiveNow) ? 0 : 1));
-  const recorderReferenceClipUrl = recorderClips[0]?.videoUrl ?? null;
-
-  const heroMessage = buildHeroMessage(practicedToday, activeStreak, activeDayCount);
-  const todayPrompt = getTodayPrompt(activeDayCount, activeJourney?.id ?? null);
 
   return (
     <>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <View style={styles.headerBlock}>
-          <Text style={styles.title}>Practice</Text>
-          <Text style={styles.subtitle}>Show up today. Watch your skill sharpen.</Text>
-          {__DEV__ && devDateShiftSettings.enabled ? (
-            <Text style={styles.devHintText}>
-              Dev date shift active: {devDateShiftSettings.dayOffset >= 0 ? "+" : ""}
-              {devDateShiftSettings.dayOffset} day{Math.abs(devDateShiftSettings.dayOffset) === 1 ? "" : "s"}
-              {devDateShiftSettings.autoAdvanceAfterSave ? " • auto-advance on" : ""}
-            </Text>
-          ) : null}
-        </View>
+      {activeJourney ? (
+        <View style={styles.container}>
+          <View
+            style={[
+              styles.sceneContent,
+              {
+                paddingTop: sceneTopPadding,
+                paddingHorizontal: sceneHorizontalPadding,
+                paddingBottom: sceneBottomPadding
+              }
+            ]}
+          >
+            <View style={[styles.contentTop, revealFocusMode ? styles.contentTopRevealFocus : undefined]}>
+              {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+              <Animated.View
+                style={[
+                  styles.motionSection,
+                  {
+                    opacity: heroSectionReveal,
+                    transform: [
+                      {
+                        translateY: heroSectionReveal.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [motionTokens.reveal.primaryY, 0]
+                        })
+                      },
+                      {
+                        scale: heroSectionReveal.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [motionTokens.reveal.primaryScaleFrom, 1]
+                        })
+                      }
+                    ]
+                  }
+                ]}
+              >
+                <View style={[styles.skillHeader, revealFocusMode ? styles.skillHeaderRevealFocus : undefined]}>
+                  <Text style={[styles.sceneKicker, revealFocusMode ? styles.sceneKickerRevealFocus : undefined]}>Chapter {chapterNumber}</Text>
+                  <View style={styles.skillHeaderTop}>
+                    <Text
+                      style={[
+                        styles.skillName,
+                        compactMode ? styles.skillNameCompact : undefined,
+                        tightMode ? styles.skillNameTight : undefined,
+                        { fontSize: skillNameSize, lineHeight: Math.round(skillNameSize * 1.13) }
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {activeJourney.title}
+                    </Text>
+                    <TactilePressable
+                      style={[
+                        styles.moreChip,
+                        compactMode ? styles.moreChipCompact : undefined,
+                        revealFocusMode ? styles.moreChipRevealFocus : undefined
+                      ]}
+                      onPress={() => {
+                        setManageOpen(true);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Manage journeys"
+                      accessibilityHint="Create, switch, and close journeys"
+                    >
+                      <Text style={styles.moreChipText}>Manage</Text>
+                    </TactilePressable>
+                  </View>
+                  <Animated.View style={{ transform: [{ scale: statPulse }] }}>
+                    <Text
+                      style={[
+                        styles.dayLine,
+                        compactMode ? styles.dayLineCompact : undefined,
+                        tightMode ? styles.dayLineTight : undefined,
+                        revealFocusMode ? styles.dayLineRevealFocus : undefined,
+                        { fontSize: dayLineSize, lineHeight: Math.round(dayLineSize * 1.14) }
+                      ]}
+                    >
+                      {chapterRevealReady
+                        ? `Reveal ready • Day ${chapterDisplayDay}/${chapterTargetDays}`
+                        : `Day ${chapterDisplayDay} of ${chapterTargetDays}`}
+                    </Text>
+                    {!chapterRevealReady ? (
+                      <Text
+                        style={[
+                          styles.streakLine,
+                          compactMode ? styles.streakLineCompact : undefined,
+                          tightMode ? styles.streakLineTight : undefined,
+                          { fontSize: streakLineSize, lineHeight: Math.round(streakLineSize * 1.15) }
+                        ]}
+                      >
+                        🔥 {displayStreak} Day Streak
+                      </Text>
+                    ) : null}
+                  </Animated.View>
+                </View>
+                {celebration ? (
+                  <Animated.View style={[styles.celebrationBanner, { opacity: celebrationOpacity, transform: [{ translateY: celebrationY }] }]}>
+                    <Text style={styles.celebrationTitle}>{celebration.title}</Text>
+                    <Text style={styles.celebrationSubtitle}>{celebration.subtitle}</Text>
+                  </Animated.View>
+                ) : null}
+              </Animated.View>
+            </View>
 
-        {celebrationText ? (
-          <Animated.View style={[styles.celebrationBanner, { opacity: celebrationOpacity, transform: [{ translateY: celebrationY }] }]}>
-            <Text style={styles.celebrationText}>{celebrationText}</Text>
-          </Animated.View>
-        ) : null}
-
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-        {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
-        {loading ? <Text style={styles.mutedText}>Loading your practice space...</Text> : null}
-
-        {activeJourney ? (
-          <PracticeHeroCard
-            title={activeJourney.title}
-            practicedToday={practicedToday}
-            dayCount={activeDayCount}
-            streak={activeStreak}
-            heroMessage={heroMessage}
-            todayPrompt={todayPrompt}
-            statPulse={statPulse}
-            milestonePulse={milestonePulse}
-            milestoneFlash={milestoneFlash}
-            nextMilestone={nextMilestone}
-            onRecord={() => {
-              trackEvent("record_tapped", { journeyId: activeJourney.id, context: "practice_hero" });
-              setRecorderJourneyId(activeJourney.id);
-            }}
-          />
-        ) : !loading ? (
-          <View style={styles.emptyHeroCard}>
-            <Text style={styles.emptyHeroTitle}>Your journey starts today</Text>
-            <Text style={styles.emptyHeroSubtitle}>Create a skill journey and record your first practice clip.</Text>
-            <ActionButton label="Create First Journey" variant="primary" onPress={() => setManageOpen(true)} />
+            <Animated.View
+              style={[
+                styles.sceneMain,
+                revealFocusMode ? styles.contentBottomRevealFocus : undefined,
+                {
+                  opacity: previewSectionReveal,
+                  transform: [
+                    {
+                      translateY: previewSectionReveal.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [motionTokens.reveal.primaryY, 0]
+                      })
+                    },
+                    {
+                      scale: previewSectionReveal.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [motionTokens.reveal.primaryScaleFrom, 1]
+                      })
+                    }
+                  ]
+                }
+              ]}
+            >
+              {!chapterRevealReady ? (
+                <View style={styles.chapterMetaRail}>
+                  <Text style={styles.chapterMetaPrimary} numberOfLines={1}>
+                    {chapterCountdownLabel}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={[styles.chapterPrimaryAction, revealFocusMode ? styles.chapterPrimaryActionRevealFocus : undefined]}>
+                <ActionButton
+                  label={chapterRevealReady ? "Open Reveal" : practicedToday ? "Record Again Today" : "Record Today"}
+                  variant="primary"
+                  fullWidth
+                  dense={scenePrimaryDense}
+                  onPress={handlePrimaryAction}
+                />
+              </View>
+              <View style={styles.sceneCalendarWrap}>
+                <PracticeCalendarMini
+                  clips={activeJourneyClips}
+                  now={now}
+                  compact={sceneCalendarCompact}
+                  hero
+                  fill={false}
+                  scene
+                  captureMode={activeJourney.captureMode}
+                  milestoneLengthDays={chapterTargetDays}
+                  milestoneProgressDays={chapterProgressDays}
+                  revealReady={chapterRevealReady}
+                  onReRecordToday={() => {
+                    if (!activeJourney) return;
+                    trackEvent("record_tapped", { journeyId: activeJourney.id, context: "calendar_today_rerecord" });
+                    setRecorderJourneyId(activeJourney.id);
+                  }}
+                />
+              </View>
+            </Animated.View>
           </View>
-        ) : null}
-
-        {activeJourney ? (
-          <PracticeProgressPreviewCard
-            clips={activeJourneyClips}
-            loading={clipsLoading}
-            practiceDots={practiceDots}
-            recentlyFilledDotIndex={recentlyFilledDotIndex}
-            dotFillProgress={dotFillProgress}
-            newestClipReveal={newestClipReveal}
-            recentlySavedClipId={recentlySavedClipId}
-            onOpenTimeline={() => setTimelineOpen(true)}
-            onOpenClip={(clip) => setActiveClip(clip)}
-            onOpenProgress={() => onOpenProgress(activeJourney.id)}
-          />
-        ) : null}
-
-        {activeJourney ? (
-          <Pressable style={({ pressed }) => [styles.manageInlineLink, pressed ? styles.pressed : undefined]} onPress={() => setManageOpen(true)}>
-            <Text style={styles.manageInlineLinkText}>Manage journeys</Text>
-          </Pressable>
-        ) : null}
-      </ScrollView>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: sceneTopPadding,
+              paddingHorizontal: sceneHorizontalPadding,
+              paddingBottom: Math.max(166, insets.bottom + 132)
+            }
+          ]}
+          showsVerticalScrollIndicator={false}
+          scrollIndicatorInsets={{ bottom: Math.max(126, insets.bottom + 100) }}
+        >
+          <View style={styles.contentTop}>
+            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+            {statusMessage && !celebration ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
+            {loading ? <Text style={styles.mutedText}>Loading your practice space...</Text> : null}
+            {!loading ? (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyTitle}>Your journey starts today.</Text>
+                <Text style={styles.emptySubtitle}>Create a skill and record your first practice clip.</Text>
+                <ActionButton label="Create First Journey" variant="primary" fullWidth dense={compactMode} onPress={() => setManageOpen(true)} />
+              </View>
+            ) : null}
+          </View>
+        </ScrollView>
+      )}
 
       {saveFlightClipUrl ? (
         <Animated.View
@@ -518,9 +513,13 @@ export function JourneysScreen({
         newTitle={newTitle}
         newCategory={newCategory}
         newGoalText={newGoalText}
+        newMilestoneLengthDays={newMilestoneLengthDays}
+        newCaptureMode={newCaptureMode}
         onTitleChange={setNewTitle}
         onCategoryChange={setNewCategory}
         onGoalTextChange={setNewGoalText}
+        onMilestoneLengthChange={setNewMilestoneLengthDays}
+        onCaptureModeChange={setNewCaptureMode}
         onClose={() => setManageOpen(false)}
         onCreateJourney={() => {
           void handleCreateJourney();
@@ -549,6 +548,7 @@ export function JourneysScreen({
         statusMessage={recorderStatusMessage}
         journeyTitle={recorderJourney?.title ?? "Practice"}
         dayNumber={recorderDay}
+        captureType={recorderCaptureType}
         referenceClipUrl={recorderReferenceClipUrl}
         onCancel={() => {
           if (clipSaving) return;
@@ -556,15 +556,6 @@ export function JourneysScreen({
           setRecorderStatusMessage(null);
         }}
         onSave={handleSaveRecordedClip}
-      />
-
-      <ClipViewerModal clip={activeClip} onClose={() => setActiveClip(null)} />
-
-      <TimelineModal
-        visible={timelineOpen}
-        clips={activeJourneyClips}
-        onClose={() => setTimelineOpen(false)}
-        onSelectClip={(clip) => setActiveClip(clip)}
       />
     </>
   );
@@ -574,32 +565,47 @@ const styles = StyleSheet.create({
   container: {
     flex: 1
   },
-  content: {
-    paddingHorizontal: 18,
-    paddingBottom: 22
+  scrollContent: {
+    flexGrow: 1
   },
-  headerBlock: {
-    marginTop: 6
+  sceneContent: {
+    flex: 1
   },
-  title: {
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: "800",
-    color: theme.colors.textPrimary
+  contentTop: {
+    gap: 6
   },
-  subtitle: {
-    marginTop: 6,
-    fontSize: 16,
-    color: theme.colors.textSecondary
+  contentTopLocked: {
+    gap: 0
   },
-  devHintText: {
-    marginTop: 5,
-    color: theme.colors.accentStrong,
-    fontSize: 12,
-    fontWeight: "700"
+  contentTopReadyCompact: {
+    gap: 2
+  },
+  contentTopRevealFocus: {
+    gap: 4
+  },
+  contentBottom: {
+    marginTop: 10
+  },
+  sceneMain: {
+    marginTop: 10,
+    minHeight: 0
+  },
+  sceneCalendarWrap: {
+    minHeight: 0
+  },
+  contentBottomReadyCompact: {
+    marginTop: 10
+  },
+  contentBottomRevealFocus: {
+    marginTop: 10
+  },
+  contentBottomLocked: {
+    marginTop: 8,
+    flex: 1,
+    minHeight: 0
   },
   celebrationBanner: {
-    marginTop: 14,
+    marginTop: -2,
     borderRadius: 16,
     backgroundColor: "rgba(13,159,101,0.14)",
     borderWidth: 1,
@@ -607,9 +613,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12
   },
-  celebrationText: {
+  celebrationTitle: {
     color: theme.colors.success,
     fontWeight: "800",
+    fontSize: 17,
+    textAlign: "center"
+  },
+  celebrationSubtitle: {
+    marginTop: 2,
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    fontSize: 13,
     textAlign: "center"
   },
   errorText: {
@@ -626,39 +640,251 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: theme.colors.textSecondary
   },
-  emptyHeroCard: {
-    marginTop: 24,
-    borderRadius: 28,
-    backgroundColor: "rgba(252,255,255,0.86)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.86)",
-    padding: 20,
-    shadowColor: "#113761",
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 7
+  motionSection: {
+    width: "100%"
   },
-  emptyHeroTitle: {
-    fontSize: 32,
-    lineHeight: 36,
+  skillHeader: {
+    gap: 6
+  },
+  skillHeaderRevealFocus: {
+    gap: 5
+  },
+  sceneKicker: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 13,
     fontWeight: "800",
-    color: theme.colors.textPrimary
+    textTransform: "uppercase",
+    letterSpacing: 0.68
   },
-  emptyHeroSubtitle: {
+  sceneKickerRevealFocus: {
+    color: theme.colors.textSecondary,
+    opacity: 0.88,
+    fontSize: 10,
+    lineHeight: 12,
+    letterSpacing: 0.55
+  },
+  skillHeaderTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  skillName: {
+    flex: 1,
+    color: theme.colors.textPrimary,
+    fontSize: 25,
+    lineHeight: 29,
+    fontWeight: "800"
+  },
+  skillNameCompact: {
+    fontSize: 24,
+    lineHeight: 28
+  },
+  skillNameTight: {
+    fontSize: 21,
+    lineHeight: 24
+  },
+  moreChip: {
+    minHeight: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(239,248,255,0.54)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    shadowColor: "#102f58",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 }
+  },
+  moreChipRevealFocus: {
+    minHeight: 38,
+    borderRadius: 19,
+    borderColor: "rgba(255,255,255,0.74)",
+    backgroundColor: "rgba(255,255,255,0.32)",
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  moreChipCompact: {
+    minHeight: 34,
+    borderRadius: 17,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  moreChipText: {
+    color: theme.colors.textPrimary,
+    fontWeight: "800",
+    fontSize: 12,
+    lineHeight: 14,
+    letterSpacing: 0.2
+  },
+  dayLine: {
+    color: theme.colors.textPrimary,
+    fontSize: 18,
+    lineHeight: 21,
+    fontWeight: "800"
+  },
+  dayLineCompact: {
+    fontSize: 20,
+    lineHeight: 23
+  },
+  dayLineTight: {
+    fontSize: 18,
+    lineHeight: 21
+  },
+  dayLineRevealFocus: {
+    color: theme.colors.textPrimary,
+    fontWeight: "800"
+  },
+  compactStreakLine: {
+    marginTop: 2,
+    color: theme.colors.accentStrong,
+    fontSize: 14,
+    lineHeight: 17,
+    fontWeight: "800"
+  },
+  streakLine: {
+    color: theme.colors.accentStrong,
+    fontSize: 14,
+    lineHeight: 17,
+    fontWeight: "800"
+  },
+  streakLineCompact: {
+    fontSize: 16,
+    lineHeight: 19
+  },
+  streakLineTight: {
+    fontSize: 14,
+    lineHeight: 17
+  },
+  captureModeRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    gap: 8
+  },
+  captureModeChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.68)",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  captureModeChipSelected: {
+    borderColor: "rgba(14,99,255,0.62)",
+    backgroundColor: "rgba(14,99,255,0.2)"
+  },
+  captureModeChipText: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  captureModeChipTextSelected: {
+    color: theme.colors.accentStrong
+  },
+  chapterScene: {
+    gap: 14
+  },
+  chapterSceneRevealFocus: {
+    gap: 8
+  },
+  chapterSceneLocked: {
+    flex: 1
+  },
+  chapterSceneFrame: {
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: "transparent",
+    backgroundColor: "transparent",
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    shadowColor: "transparent",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0
+  },
+  chapterSceneFrameLocked: {
+    flex: 1
+  },
+  chapterMetaRail: {
+    marginBottom: 4,
+    gap: 2
+  },
+  chapterPrimaryAction: {
+    marginBottom: 14
+  },
+  chapterPrimaryActionRevealFocus: {
+    marginBottom: 16
+  },
+  chapterMetaPrimary: {
+    color: theme.colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "800"
+  },
+  criticalFooterRow: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.68)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    paddingHorizontal: 11,
+    paddingVertical: 9
+  },
+  criticalFooterTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 14,
+    lineHeight: 17,
+    fontWeight: "800"
+  },
+  criticalFooterSubtitle: {
+    marginTop: 2,
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "600"
+  },
+  criticalFooterAction: {
     marginTop: 8,
-    fontSize: 17,
-    color: theme.colors.textSecondary,
-    fontWeight: "700"
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(14,99,255,0.42)",
+    backgroundColor: "rgba(14,99,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 10
   },
-  manageInlineLink: {
-    marginTop: 12,
-    alignSelf: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 8
+  criticalFooterActionText: {
+    color: theme.colors.accentStrong,
+    fontSize: 13,
+    fontWeight: "800"
   },
-  manageInlineLinkText: {
+  emptyWrap: {
+    marginTop: 26,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(255,255,255,0.22)",
+    padding: 16
+  },
+  emptyTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "800"
+  },
+  emptySubtitle: {
+    marginTop: 7,
     color: theme.colors.textSecondary,
+    fontSize: 16,
     fontWeight: "600"
   },
   saveFlightChip: {
@@ -681,8 +907,5 @@ const styles = StyleSheet.create({
   saveFlightVideo: {
     width: "100%",
     height: "100%"
-  },
-  pressed: {
-    transform: [{ scale: 0.98 }]
   }
 });

@@ -1,4 +1,4 @@
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, StyleSheet, Text, View } from "react-native";
 
 import { GlassSurface } from "../../components/GlassSurface";
 import { theme } from "../../theme";
@@ -17,9 +17,7 @@ type MilestonesCardProps = {
   recentlyUnlockedMilestoneDay: number | null;
   milestoneUnlockPulse: Animated.Value;
   milestoneUnlockGlow: Animated.Value;
-  showAllMilestones: boolean;
-  onShowAll: () => void;
-  onShowLess: () => void;
+  mode?: "full" | "next";
 };
 
 export function MilestonesCard({
@@ -29,17 +27,19 @@ export function MilestonesCard({
   recentlyUnlockedMilestoneDay,
   milestoneUnlockPulse,
   milestoneUnlockGlow,
-  showAllMilestones,
-  onShowAll,
-  onShowLess
+  mode = "full"
 }: MilestonesCardProps) {
+  const isNextMode = mode === "next";
+  const isComplete = unlockedMilestones >= milestonesTotal;
   return (
     <GlassSurface style={styles.milestoneCard}>
       <View style={styles.milestoneHeader}>
-        <Text style={styles.milestoneTitle}>Milestones</Text>
-        <Text style={styles.milestoneCount}>
-          {unlockedMilestones}/{milestonesTotal} unlocked
-        </Text>
+        <Text style={styles.milestoneTitle}>{isNextMode ? (isComplete ? "Milestones complete" : "Next unlock") : "Milestones"}</Text>
+        {!isNextMode ? (
+          <Text style={styles.milestoneCount}>
+            {unlockedMilestones}/{milestonesTotal} unlocked
+          </Text>
+        ) : null}
       </View>
       {milestonePreview.map((milestone) => (
         <Animated.View
@@ -74,15 +74,10 @@ export function MilestonesCard({
           </View>
         </Animated.View>
       ))}
-      {milestonePreview.length < milestonesTotal ? (
-        <Pressable style={({ pressed }) => [styles.viewAllLink, pressed ? styles.pressScale : undefined]} onPress={onShowAll}>
-          <Text style={styles.viewAllLinkText}>View all milestones</Text>
-        </Pressable>
-      ) : null}
-      {showAllMilestones && milestonePreview.length === milestonesTotal ? (
-        <Pressable style={({ pressed }) => [styles.viewAllLink, pressed ? styles.pressScale : undefined]} onPress={onShowLess}>
-          <Text style={styles.viewAllLinkText}>Show less</Text>
-        </Pressable>
+      {isNextMode ? (
+        <Text style={styles.nextHintText}>
+          {isComplete ? "You unlocked every current milestone. Keep showing up." : "Show up daily to unlock this moment faster."}
+        </Text>
       ) : null}
     </GlassSurface>
   );
@@ -141,15 +136,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: theme.colors.textSecondary
   },
-  viewAllLink: {
-    marginTop: 12,
-    alignSelf: "flex-start"
+  nextHintText: {
+    marginTop: 10,
+    color: theme.colors.textSecondary,
+    fontWeight: "600",
+    fontSize: 13
   },
-  viewAllLinkText: {
-    color: theme.colors.accentStrong,
-    fontWeight: "700"
-  },
-  pressScale: {
-    transform: [{ scale: 0.98 }]
-  }
 });

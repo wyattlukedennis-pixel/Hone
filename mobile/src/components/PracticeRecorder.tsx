@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { ResizeMode, Video } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
@@ -7,6 +7,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { trackEvent } from "../analytics/events";
 import { theme } from "../theme";
+import { useReducedMotion } from "../utils/useReducedMotion";
+import { RecorderCaptureTray } from "./recorder/RecorderCaptureTray";
+import { RecorderPermissionGate } from "./recorder/RecorderPermissionGate";
+import { RecorderRecordButton } from "./recorder/RecorderRecordButton";
+import { RecorderTopOverlay } from "./recorder/RecorderTopOverlay";
 
 type PracticeRecorderProps = {
   visible: boolean;
@@ -14,15 +19,11 @@ type PracticeRecorderProps = {
   statusMessage: string | null;
   journeyTitle?: string;
   dayNumber?: number;
+  captureType: "video" | "photo";
   referenceClipUrl?: string | null;
   onCancel: () => void;
-  onSave: (payload: { uri: string; durationMs: number; recordedAt: string }) => Promise<{ success: boolean; errorMessage?: string }>;
+  onSave: (payload: { uri: string; durationMs: number; recordedAt: string; captureType: "video" | "photo" }) => Promise<{ success: boolean; errorMessage?: string }>;
 };
-
-function formatDuration(ms: number) {
-  const seconds = Math.max(1, Math.round(ms / 1000));
-  return `${seconds}s`;
-}
 
 export function PracticeRecorder({
   visible,
@@ -30,6 +31,7 @@ export function PracticeRecorder({
   statusMessage,
   journeyTitle,
   dayNumber,
+  captureType,
   referenceClipUrl,
   onCancel,
   onSave
@@ -46,6 +48,8 @@ export function PracticeRecorder({
   const [showReferenceGuide, setShowReferenceGuide] = useState(false);
   const [cameraMounted, setCameraMounted] = useState(false);
   const transition = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
+  const duration = (ms: number) => (reducedMotion ? 0 : ms);
 
   useEffect(() => {
     if (!visible) {
@@ -64,12 +68,12 @@ export function PracticeRecorder({
     transition.setValue(0);
     Animated.timing(transition, {
       toValue: 1,
-      duration: 190,
+      duration: duration(theme.motion.transitionMs),
       useNativeDriver: true
     }).start();
     const mountTimer = setTimeout(() => {
       setCameraMounted(true);
-    }, 140);
+    }, reducedMotion ? 0 : 140);
 
     return () => clearTimeout(mountTimer);
   }, [visible, transition]);
@@ -82,21 +86,37 @@ export function PracticeRecorder({
     return () => clearInterval(timer);
   }, [recordingStartedAtMs]);
 
-  async function startRecording() {
+  async function startCapture() {
     if (!cameraRef.current || !cameraMounted) return;
 
     const startedAt = Date.now();
     const recordedAtIso = new Date(startedAt).toISOString();
+    if (captureType === "photo") {
+      trackEvent("recording_started", { journeyTitle: journeyTitle ?? null, dayNumber: dayNumber ?? null, facing, captureType });
+      const result = await cameraRef.current.takePictureAsync({
+        quality: 0.9
+      });
+      if (result?.uri) {
+        trackEvent("recording_completed", { durationMs: 1000, facing, captureType });
+        setCaptured({
+          uri: result.uri,
+          durationMs: 1000,
+          recordedAt: recordedAtIso
+        });
+      }
+      return;
+    }
+
     setRecording(true);
     setRecordingStartedAtMs(startedAt);
-    trackEvent("recording_started", { journeyTitle: journeyTitle ?? null, dayNumber: dayNumber ?? null, facing });
+    trackEvent("recording_started", { journeyTitle: journeyTitle ?? null, dayNumber: dayNumber ?? null, facing, captureType });
     try {
       const result = await cameraRef.current.recordAsync({
         maxDuration: 10
       });
       const durationMs = Math.max(1000, Date.now() - startedAt);
       if (result?.uri) {
-        trackEvent("recording_completed", { durationMs, facing });
+        trackEvent("recording_completed", { durationMs, facing, captureType });
         setCaptured({
           uri: result.uri,
           durationMs,
@@ -147,26 +167,16 @@ export function PracticeRecorder({
           ]}
         >
           {!permission || !permission.granted ? (
-            <LinearGradient colors={["#e6eef7", "#d0deef"]} style={[styles.permissionWrap, { paddingTop: Math.max(16, insets.top + 10) }]}>
-              <Pressable style={({ pressed }) => [styles.closeButton, pressed ? styles.buttonPressed : undefined]} onPress={onCancel}>
-                <Text style={styles.closeButtonText}>Close</Text>
-              </Pressable>
-              <View style={styles.permissionCard}>
-                <Text style={styles.permissionTitle}>Camera access needed</Text>
-                <Text style={styles.permissionText}>Hone uses quick daily clips to track your progress.</Text>
-                <Pressable
-                  style={styles.allowButton}
-                  onPress={() => {
-                    void requestPermission();
-                  }}
-                >
-                  <Text style={styles.allowText}>Allow Camera</Text>
-                </Pressable>
-              </View>
-            </LinearGradient>
+            <RecorderPermissionGate
+              paddingTop={Math.max(16, insets.top + 10)}
+              onClose={onCancel}
+              onRequestPermission={() => {
+                void requestPermission();
+              }}
+            />
           ) : (
             <View style={styles.container}>
-          {cameraMounted ? <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode="video" mute facing={facing} /> : null}
+          {cameraMounted ? <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode={captureType === "photo" ? "picture" : "video"} mute facing={facing} /> : null}
           {!cameraMounted ? (
             <View style={styles.cameraBootPlaceholder}>
               <ActivityIndicator size="small" color="#d6e6fa" />
@@ -175,131 +185,72 @@ export function PracticeRecorder({
           ) : null}
           {referenceClipUrl && cameraMounted && !captured && showReferenceGuide ? (
             <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              <Video source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} shouldPlay isLooping isMuted resizeMode={ResizeMode.COVER} />
+              {captureType === "photo" ? (
+                <Image source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              ) : (
+                <Video source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} shouldPlay isLooping isMuted resizeMode={ResizeMode.COVER} />
+              )}
               <View style={styles.referenceOverlayMask} />
             </View>
           ) : null}
           <LinearGradient colors={["rgba(8,16,30,0.4)", "rgba(8,16,30,0.06)", "rgba(8,16,30,0.45)"]} style={StyleSheet.absoluteFill} />
 
-          <View style={[styles.topOverlay, { paddingTop: Math.max(14, insets.top + 8) }]}>
-            <View style={styles.topActions}>
-              <Pressable
-                style={({ pressed }) => [styles.closeButtonDark, pressed && !recording && !saving ? styles.buttonPressed : undefined]}
-                onPress={onCancel}
-                disabled={recording || saving}
-              >
-                <Text style={styles.closeButtonDarkText}>Close</Text>
-              </Pressable>
-              <View style={styles.topRightActions}>
-                {referenceClipUrl ? (
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.flipButton,
-                      showReferenceGuide ? styles.guideButtonOn : undefined,
-                      pressed && !recording && !saving ? styles.buttonPressed : undefined
-                    ]}
-                    onPress={() => {
-                      setShowReferenceGuide((current) => !current);
-                    }}
-                    disabled={recording || saving || !cameraMounted}
-                  >
-                    <Text style={styles.flipButtonText}>{showReferenceGuide ? "Guide On" : "Guide Off"}</Text>
-                  </Pressable>
-                ) : null}
-                <Pressable
-                  style={({ pressed }) => [styles.flipButton, pressed && !recording && !saving ? styles.buttonPressed : undefined]}
-                  onPress={() => {
-                    trackEvent("camera_flipped", { from: facing, to: facing === "front" ? "back" : "front" });
-                    setFacing((value) => (value === "front" ? "back" : "front"));
-                  }}
-                  disabled={recording || saving || !cameraMounted}
-                >
-                  <Text style={styles.flipButtonText}>Flip</Text>
-                </Pressable>
-              </View>
-            </View>
-            <View style={styles.topCopy}>
-              <Text style={styles.kicker}>{journeyTitle ?? "Practice"}</Text>
-              <Text style={styles.title}>Day {dayNumber ?? 1}</Text>
-              <Text style={styles.subtitle}>Keep your framing similar each day for better comparisons.</Text>
-            </View>
-            {recordingStartedAtMs ? (
-              <Text style={styles.liveBadge}>
-                Recording {formatDuration(Date.now() - recordingStartedAtMs)}
-                {ticker % 2 ? " •" : ""}
-              </Text>
-            ) : (
-              <Text style={styles.liveHint}>
-                5-10 seconds works best
-                {referenceClipUrl ? ` • ${showReferenceGuide ? "Reference guide on" : "Reference guide off"}` : ""}
-              </Text>
-            )}
-          </View>
+            <RecorderTopOverlay
+              paddingTop={Math.max(14, insets.top + 8)}
+              recording={recording}
+              saving={saving}
+              captureType={captureType}
+              journeyTitle={journeyTitle}
+              dayNumber={dayNumber}
+            hasReferenceClip={Boolean(referenceClipUrl)}
+            showReferenceGuide={showReferenceGuide}
+            cameraMounted={cameraMounted}
+            recordingStartedAtMs={recordingStartedAtMs}
+            ticker={ticker}
+            onClose={onCancel}
+            onToggleGuide={() => {
+              setShowReferenceGuide((current) => !current);
+            }}
+            onFlip={() => {
+              trackEvent("camera_flipped", { from: facing, to: facing === "front" ? "back" : "front" });
+              setFacing((value) => (value === "front" ? "back" : "front"));
+            }}
+          />
 
           <View style={[styles.bottomOverlay, { paddingBottom: safeBottom }]}>
             {captured ? (
-              <View style={styles.captureCard}>
-                <Text style={styles.captureTitle}>Clip captured ({formatDuration(captured.durationMs)})</Text>
-                {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
-                {saveErrorMessage ? <Text style={styles.errorText}>{saveErrorMessage}</Text> : null}
-                <View style={styles.captureActions}>
-                  <Pressable
-                    style={({ pressed }) => [styles.ghostButton, pressed && !recording && !saving ? styles.buttonPressed : undefined]}
-                    onPress={onCancel}
-                    disabled={recording || saving}
-                  >
-                    <Text style={styles.ghostButtonText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.ghostButton, pressed && !saving ? styles.buttonPressed : undefined]}
-                    onPress={() => setCaptured(null)}
-                    disabled={saving}
-                  >
-                    <Text style={styles.ghostButtonText}>Retake</Text>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.saveButton,
-                      saving ? styles.disabled : undefined,
-                      pressed && !saving ? styles.buttonPressed : undefined
-                    ]}
-                    onPress={async () => {
-                      if (!captured) return;
-                      setSaveErrorMessage(null);
-                      const result = await onSave(captured);
-                      if (!result.success) {
-                        setSaveErrorMessage(result.errorMessage ?? "Failed to save clip.");
-                      }
-                    }}
-                    disabled={saving}
-                  >
-                    <Text style={styles.saveText}>{saving ? "Saving..." : "Save Clip"}</Text>
-                  </Pressable>
-                </View>
-              </View>
+              <RecorderCaptureTray
+                durationMs={captured.durationMs}
+                captureType={captureType}
+                saving={saving}
+                recording={recording}
+                statusMessage={statusMessage}
+                saveErrorMessage={saveErrorMessage}
+                onCancel={onCancel}
+                onRetake={() => setCaptured(null)}
+                onSave={async () => {
+                  if (!captured) return;
+                  setSaveErrorMessage(null);
+                  const result = await onSave({ ...captured, captureType });
+                  if (!result.success) {
+                    setSaveErrorMessage(result.errorMessage ?? "Failed to save clip.");
+                  }
+                }}
+              />
             ) : (
-              <View style={styles.recordWrap}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.recordOuter,
-                    recording ? styles.recordOuterActive : undefined,
-                    pressed ? styles.recordPressed : undefined
-                  ]}
-                  onPress={() => {
-                    if (recording) {
-                      stopRecording();
-                    } else {
-                      void startRecording();
-                    }
-                  }}
-                  disabled={saving || !cameraMounted}
-                >
-                  <View style={[styles.recordInner, recording ? styles.recordInnerActive : undefined]} />
-                </Pressable>
-                <Text style={styles.recordText}>
-                  {!cameraMounted ? "Preparing camera..." : recording ? "Tap to stop" : "Tap to record today"}
-                </Text>
-              </View>
+              <RecorderRecordButton
+                recording={recording}
+                saving={saving}
+                cameraMounted={cameraMounted}
+                captureType={captureType}
+                onToggle={() => {
+                  if (captureType === "video" && recording) {
+                    stopRecording();
+                  } else {
+                    void startCapture();
+                  }
+                }}
+              />
             )}
           </View>
             </View>
@@ -347,134 +298,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 12
   },
-  permissionWrap: {
-    flex: 1,
-    paddingHorizontal: 18
-  },
-  permissionCard: {
-    marginTop: 24,
-    borderRadius: 24,
-    padding: 18,
-    backgroundColor: "rgba(255,255,255,0.72)",
-    shadowColor: "#143c66",
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6
-  },
-  permissionTitle: {
-    color: theme.colors.textPrimary,
-    fontSize: 26,
-    fontWeight: "800"
-  },
-  permissionText: {
-    marginTop: 8,
-    color: theme.colors.textSecondary
-  },
-  allowButton: {
-    marginTop: 16,
-    borderRadius: 14,
-    backgroundColor: theme.colors.accent,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  allowText: {
-    color: "#edf5ff",
-    fontWeight: "800"
-  },
-  closeButton: {
-    alignSelf: "flex-start",
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.65)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.8)",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  closeButtonText: {
-    color: theme.colors.textSecondary,
-    fontWeight: "700"
-  },
-  topOverlay: {
-    paddingHorizontal: 18
-  },
-  topActions: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center"
-  },
-  topRightActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8
-  },
-  closeButtonDark: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  closeButtonDarkText: {
-    color: "#f0f6ff",
-    fontWeight: "700"
-  },
-  flipButton: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  flipButtonText: {
-    color: "#f0f6ff",
-    fontWeight: "700"
-  },
-  guideButtonOn: {
-    borderColor: "rgba(13,159,101,0.7)",
-    backgroundColor: "rgba(13,159,101,0.2)"
-  },
-  topCopy: {
-    marginTop: 14
-  },
-  kicker: {
-    color: "#c5d6ed",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    fontWeight: "800",
-    fontSize: 12
-  },
-  title: {
-    marginTop: 4,
-    color: "#f2f8ff",
-    fontSize: 36,
-    fontWeight: "800"
-  },
-  subtitle: {
-    marginTop: 6,
-    color: "#d2e4fb",
-    maxWidth: "82%"
-  },
-  liveBadge: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(214,69,93,0.26)",
-    borderWidth: 1,
-    borderColor: "rgba(214,69,93,0.65)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    color: "#ffe7ec",
-    fontWeight: "800"
-  },
-  liveHint: {
-    marginTop: 10,
-    color: "#d2e4fb",
-    fontWeight: "600"
-  },
   referenceOverlayMask: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(197,218,243,0.12)"
@@ -484,96 +307,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 14
   },
-  captureCard: {
-    borderRadius: 20,
-    backgroundColor: "rgba(8,16,30,0.62)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.32)",
-    padding: 12
-  },
-  captureTitle: {
-    color: "#edf5ff",
-    fontSize: 18,
-    fontWeight: "800"
-  },
-  statusText: {
-    marginTop: 6,
-    color: "#7ce2b7",
-    fontWeight: "700"
-  },
-  errorText: {
-    marginTop: 6,
-    color: "#ff8da0",
-    fontWeight: "700"
-  },
-  captureActions: {
-    marginTop: 12,
-    flexDirection: "row",
-    gap: 10,
-    flexWrap: "wrap"
-  },
-  ghostButton: {
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(255,255,255,0.16)",
-    paddingVertical: 10,
-    paddingHorizontal: 14
-  },
-  ghostButtonText: {
-    color: "#e7f1ff",
-    fontWeight: "700"
-  },
-  saveButton: {
-    borderRadius: 13,
-    backgroundColor: theme.colors.accent,
-    paddingVertical: 10,
-    paddingHorizontal: 14
-  },
-  saveText: {
-    color: "#edf5ff",
-    fontWeight: "800"
-  },
-  recordWrap: {
-    alignItems: "center"
-  },
-  recordOuter: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 4,
-    borderColor: "rgba(255,255,255,0.9)",
-    backgroundColor: "rgba(255,255,255,0.25)",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  recordOuterActive: {
-    borderColor: "rgba(214,69,93,0.95)"
-  },
-  recordInner: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(255,255,255,0.95)"
-  },
-  recordInnerActive: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: "#d6455d"
-  },
-  recordPressed: {
-    transform: [{ scale: 0.96 }]
-  },
-  recordText: {
-    marginTop: 10,
-    color: "#edf5ff",
-    fontWeight: "700"
-  },
-  disabled: {
-    opacity: 0.65
-  },
-  buttonPressed: {
-    transform: [{ scale: 0.98 }]
-  }
 });

@@ -1,19 +1,30 @@
-import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Modal, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassSurface } from "../components/GlassSurface";
+import { TactilePressable } from "../components/TactilePressable";
+import { TimeWheelPicker } from "../components/TimeWheelPicker";
 import { theme } from "../theme";
 import type { User } from "../types/auth";
+import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
+import type { HapticsMode } from "../types/haptics";
+import { formatDailyMomentTime } from "../utils/dailyMoment";
 
 type SettingsScreenProps = {
   user: User;
   onLogout: () => Promise<void>;
   loggingOut: boolean;
+  dailyMomentSettings: DailyMomentSettings;
+  onDailyMomentSettingsChange: (next: DailyMomentSettings) => void;
+  hapticsMode: HapticsMode;
+  onHapticsModeChange: (next: HapticsMode) => void;
   devDateShiftSettings: DevDateShiftSettings | null;
   onDevDateShiftSettingsChange: (next: DevDateShiftSettings) => void;
   onClearAllRecordings: () => Promise<{ success: boolean; message: string }>;
+  onGetPendingUploadsCount: () => Promise<number>;
+  onRetryPendingUploads: () => Promise<{ success: boolean; message: string; remaining: number }>;
 };
 
 function formatOffsetLabel(offset: number) {
@@ -27,14 +38,46 @@ export function SettingsScreen({
   user,
   onLogout,
   loggingOut,
+  dailyMomentSettings,
+  onDailyMomentSettingsChange,
+  hapticsMode,
+  onHapticsModeChange,
   devDateShiftSettings,
   onDevDateShiftSettingsChange,
-  onClearAllRecordings
+  onClearAllRecordings,
+  onGetPendingUploadsCount,
+  onRetryPendingUploads
 }: SettingsScreenProps) {
   const insets = useSafeAreaInsets();
   const isDevToolsVisible = __DEV__ && devDateShiftSettings;
   const [clearingRecordings, setClearingRecordings] = useState(false);
   const [devMessage, setDevMessage] = useState<{ text: string; success: boolean } | null>(null);
+  const [pendingUploadsCount, setPendingUploadsCount] = useState(0);
+  const [pendingUploadsLoading, setPendingUploadsLoading] = useState(true);
+  const [retryingUploads, setRetryingUploads] = useState(false);
+  const [uploadsMessage, setUploadsMessage] = useState<{ text: string; success: boolean } | null>(null);
+  const [timePickerOpen, setTimePickerOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshPendingUploads() {
+      const count = await onGetPendingUploadsCount();
+      if (cancelled) return;
+      setPendingUploadsCount(count);
+      setPendingUploadsLoading(false);
+    }
+
+    void refreshPendingUploads();
+    const timer = setInterval(() => {
+      void refreshPendingUploads();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [onGetPendingUploadsCount]);
 
   return (
     <ScrollView
@@ -52,8 +95,112 @@ export function SettingsScreen({
 
       <GlassSurface style={styles.card}>
         <Text style={styles.cardLabel}>Daily Reminder</Text>
-        <Text style={styles.cardValue}>7:00 PM Practice Prompt</Text>
+        <Text style={styles.cardValue}>{formatDailyMomentTime(dailyMomentSettings)} Practice Prompt</Text>
         <Text style={styles.cardHint}>A gentle nudge to show up and keep your streak alive.</Text>
+        <View style={styles.reminderRow}>
+          <Text style={styles.reminderLabel}>Daily Moment</Text>
+          <TactilePressable
+            style={[styles.reminderToggle, dailyMomentSettings.enabled ? styles.reminderToggleOn : undefined]}
+            onPress={() =>
+              onDailyMomentSettingsChange({
+                ...dailyMomentSettings,
+                enabled: !dailyMomentSettings.enabled
+              })
+            }
+          >
+            <Text style={[styles.reminderToggleText, dailyMomentSettings.enabled ? styles.reminderToggleTextOn : undefined]}>
+              {dailyMomentSettings.enabled ? "On" : "Off"}
+            </Text>
+          </TactilePressable>
+        </View>
+        <View style={styles.reminderAdjustRow}>
+          <TactilePressable
+            style={styles.reminderAdjustChip}
+            onPress={() => {
+              setTimePickerOpen(true);
+            }}
+          >
+            <Text style={styles.reminderAdjustText}>Set reminder time</Text>
+          </TactilePressable>
+          <TactilePressable
+            style={[styles.reminderAdjustChip, dailyMomentSettings.autoOpenRecorder ? styles.reminderAdjustChipActive : undefined]}
+            onPress={() =>
+              onDailyMomentSettingsChange({
+                ...dailyMomentSettings,
+                autoOpenRecorder: !dailyMomentSettings.autoOpenRecorder
+              })
+            }
+          >
+            <Text style={[styles.reminderAdjustText, dailyMomentSettings.autoOpenRecorder ? styles.reminderAdjustTextActive : undefined]}>
+              Auto-open
+            </Text>
+          </TactilePressable>
+        </View>
+      </GlassSurface>
+
+      <GlassSurface style={styles.card}>
+        <Text style={styles.cardLabel}>Uploads</Text>
+        <Text style={styles.cardValue}>{pendingUploadsLoading ? "Checking..." : `${pendingUploadsCount} pending`}</Text>
+        <Text style={styles.cardHint}>
+          {pendingUploadsCount > 0
+            ? "Some clips are still syncing. You can retry now."
+            : "All recorded clips are synced."}
+        </Text>
+        <View style={styles.uploadActions}>
+          <TactilePressable
+            style={[styles.uploadActionButton, retryingUploads ? styles.uploadActionButtonDisabled : undefined]}
+            onPress={async () => {
+              setRetryingUploads(true);
+              setUploadsMessage(null);
+              const result = await onRetryPendingUploads();
+              setPendingUploadsCount(result.remaining);
+              setUploadsMessage({ text: result.message, success: result.success });
+              setRetryingUploads(false);
+            }}
+            disabled={retryingUploads}
+          >
+            <Text style={styles.uploadActionButtonText}>{retryingUploads ? "Retrying..." : "Retry now"}</Text>
+          </TactilePressable>
+          <TactilePressable
+            style={styles.uploadRefreshButton}
+            onPress={async () => {
+              setPendingUploadsLoading(true);
+              const count = await onGetPendingUploadsCount();
+              setPendingUploadsCount(count);
+              setPendingUploadsLoading(false);
+            }}
+          >
+            <Text style={styles.uploadRefreshButtonText}>Refresh</Text>
+          </TactilePressable>
+        </View>
+        {uploadsMessage ? (
+          <Text style={[styles.uploadMessage, uploadsMessage.success ? styles.uploadMessageSuccess : styles.uploadMessageDanger]}>
+            {uploadsMessage.text}
+          </Text>
+        ) : null}
+      </GlassSurface>
+
+      <GlassSurface style={styles.card}>
+        <Text style={styles.cardLabel}>Haptics</Text>
+        <Text style={styles.cardValue}>Touch feedback intensity</Text>
+        <Text style={styles.cardHint}>Choose how strong taps and interaction cues should feel.</Text>
+        <View style={styles.hapticsRow}>
+          {[
+            { key: "off" as const, label: "Off" },
+            { key: "subtle" as const, label: "Subtle" },
+            { key: "standard" as const, label: "Standard" }
+          ].map((entry) => (
+            <TactilePressable
+              key={entry.key}
+              style={[styles.hapticsChip, hapticsMode === entry.key ? styles.hapticsChipActive : undefined]}
+              onPress={() => onHapticsModeChange(entry.key)}
+            >
+              <Text style={[styles.hapticsChipText, hapticsMode === entry.key ? styles.hapticsChipTextActive : undefined]}>
+                {entry.label}
+              </Text>
+            </TactilePressable>
+          ))}
+        </View>
       </GlassSurface>
 
       {isDevToolsVisible ? (
@@ -63,8 +210,8 @@ export function SettingsScreen({
           <Text style={styles.cardHint}>Simulate future days so you can test milestones and comparisons in one sitting.</Text>
 
           <View style={styles.devPresetRow}>
-            <Pressable
-              style={({ pressed }) => [styles.devPresetButton, pressed ? styles.pressed : undefined]}
+            <TactilePressable
+              style={styles.devPresetButton}
               onPress={() =>
                 onDevDateShiftSettingsChange({
                   enabled: true,
@@ -74,18 +221,14 @@ export function SettingsScreen({
               }
             >
               <Text style={styles.devPresetButtonText}>Simulate 30 Days</Text>
-            </Pressable>
+            </TactilePressable>
             <Text style={styles.devPresetHint}>Record and save 30 clips. Day offset advances after each save.</Text>
           </View>
 
           <View style={styles.devRow}>
             <Text style={styles.devRowLabel}>Date shift mode</Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.devToggle,
-                devDateShiftSettings.enabled ? styles.devToggleOn : undefined,
-                pressed ? styles.pressed : undefined
-              ]}
+            <TactilePressable
+              style={[styles.devToggle, devDateShiftSettings.enabled ? styles.devToggleOn : undefined]}
               onPress={() =>
                 onDevDateShiftSettingsChange({
                   ...devDateShiftSettings,
@@ -96,7 +239,7 @@ export function SettingsScreen({
               <Text style={[styles.devToggleText, devDateShiftSettings.enabled ? styles.devToggleTextOn : undefined]}>
                 {devDateShiftSettings.enabled ? "On" : "Off"}
               </Text>
-            </Pressable>
+            </TactilePressable>
           </View>
 
           <Text style={styles.devOffsetLabel}>Current offset: {formatOffsetLabel(devDateShiftSettings.dayOffset)}</Text>
@@ -107,9 +250,9 @@ export function SettingsScreen({
               { label: "+1", value: 1 },
               { label: "+7", value: 7 }
             ].map((entry) => (
-              <Pressable
+              <TactilePressable
                 key={entry.label}
-                style={({ pressed }) => [styles.devOffsetChip, pressed ? styles.pressed : undefined]}
+                style={styles.devOffsetChip}
                 onPress={() =>
                   onDevDateShiftSettingsChange({
                     ...devDateShiftSettings,
@@ -118,18 +261,14 @@ export function SettingsScreen({
                 }
               >
                 <Text style={styles.devOffsetChipText}>{entry.label}</Text>
-              </Pressable>
+              </TactilePressable>
             ))}
           </View>
 
           <View style={styles.devRow}>
             <Text style={styles.devRowLabel}>Auto-advance after save</Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.devToggle,
-                devDateShiftSettings.autoAdvanceAfterSave ? styles.devToggleOn : undefined,
-                pressed ? styles.pressed : undefined
-              ]}
+            <TactilePressable
+              style={[styles.devToggle, devDateShiftSettings.autoAdvanceAfterSave ? styles.devToggleOn : undefined]}
               onPress={() =>
                 onDevDateShiftSettingsChange({
                   ...devDateShiftSettings,
@@ -140,11 +279,11 @@ export function SettingsScreen({
               <Text style={[styles.devToggleText, devDateShiftSettings.autoAdvanceAfterSave ? styles.devToggleTextOn : undefined]}>
                 {devDateShiftSettings.autoAdvanceAfterSave ? "On" : "Off"}
               </Text>
-            </Pressable>
+            </TactilePressable>
           </View>
 
-          <Pressable
-            style={({ pressed }) => [styles.devReset, pressed ? styles.pressed : undefined]}
+          <TactilePressable
+            style={styles.devReset}
             onPress={() =>
               onDevDateShiftSettingsChange({
                 enabled: false,
@@ -154,14 +293,10 @@ export function SettingsScreen({
             }
           >
             <Text style={styles.devResetText}>Reset Dev Tools</Text>
-          </Pressable>
+          </TactilePressable>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.devDangerAction,
-              clearingRecordings ? styles.devDangerActionDisabled : undefined,
-              pressed && !clearingRecordings ? styles.pressed : undefined
-            ]}
+          <TactilePressable
+            style={[styles.devDangerAction, clearingRecordings ? styles.devDangerActionDisabled : undefined]}
             onPress={async () => {
               setClearingRecordings(true);
               setDevMessage(null);
@@ -172,12 +307,12 @@ export function SettingsScreen({
             disabled={clearingRecordings}
           >
             <Text style={styles.devDangerActionText}>{clearingRecordings ? "Clearing..." : "Clear All Recordings"}</Text>
-          </Pressable>
+          </TactilePressable>
           {devMessage ? <Text style={[styles.devMessage, devMessage.success ? styles.devMessageSuccess : styles.devMessageDanger]}>{devMessage.text}</Text> : null}
         </GlassSurface>
       ) : null}
 
-      <Pressable
+      <TactilePressable
         style={[styles.logoutButton, loggingOut ? styles.logoutDisabled : undefined]}
         onPress={() => {
           void onLogout();
@@ -185,7 +320,36 @@ export function SettingsScreen({
         disabled={loggingOut}
       >
         <Text style={styles.logoutText}>{loggingOut ? "Logging out..." : "Log out"}</Text>
-      </Pressable>
+      </TactilePressable>
+
+      <Modal visible={timePickerOpen} transparent animationType="slide" onRequestClose={() => setTimePickerOpen(false)}>
+        <View style={styles.timePickerBackdrop}>
+          <View style={StyleSheet.absoluteFill}>
+            <TactilePressable style={StyleSheet.absoluteFill} onPress={() => setTimePickerOpen(false)} />
+          </View>
+          <View style={[styles.timePickerSheet, { paddingBottom: Math.max(18, insets.bottom + 10) }]}>
+            <View style={styles.timePickerHeader}>
+              <Text style={styles.timePickerTitle}>Choose reminder time</Text>
+              <TactilePressable style={styles.timePickerDone} onPress={() => setTimePickerOpen(false)}>
+                <Text style={styles.timePickerDoneText}>Done</Text>
+              </TactilePressable>
+            </View>
+            <Text style={styles.timePickerCurrent}>{formatDailyMomentTime(dailyMomentSettings)} daily</Text>
+            <TimeWheelPicker
+              hour24={dailyMomentSettings.hour}
+              minute={dailyMomentSettings.minute}
+              disabled={!dailyMomentSettings.enabled}
+              onChange={({ hour24, minute }) =>
+                onDailyMomentSettingsChange({
+                  ...dailyMomentSettings,
+                  hour: hour24,
+                  minute
+                })
+              }
+            />
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -238,6 +402,134 @@ const styles = StyleSheet.create({
   cardHint: {
     marginTop: 8,
     color: theme.colors.textSecondary
+  },
+  reminderRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  reminderLabel: {
+    flex: 1,
+    color: theme.colors.textPrimary,
+    fontWeight: "700"
+  },
+  reminderToggle: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.62)",
+    backgroundColor: "rgba(255,255,255,0.3)",
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  reminderToggleOn: {
+    backgroundColor: "rgba(14,99,255,0.16)",
+    borderColor: "rgba(14,99,255,0.45)"
+  },
+  reminderToggleText: {
+    color: theme.colors.textSecondary,
+    fontWeight: "700"
+  },
+  reminderToggleTextOn: {
+    color: theme.colors.accentStrong
+  },
+  reminderAdjustRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  reminderAdjustChip: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.66)",
+    backgroundColor: "rgba(255,255,255,0.3)",
+    paddingHorizontal: 11,
+    paddingVertical: 6
+  },
+  reminderAdjustChipActive: {
+    borderColor: "rgba(14,99,255,0.45)",
+    backgroundColor: "rgba(14,99,255,0.14)"
+  },
+  reminderAdjustText: {
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    fontSize: 12
+  },
+  reminderAdjustTextActive: {
+    color: theme.colors.accentStrong
+  },
+  uploadActions: {
+    marginTop: 10,
+    flexDirection: "row",
+    gap: 8
+  },
+  uploadActionButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(14,99,255,0.45)",
+    backgroundColor: "rgba(14,99,255,0.14)",
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  uploadActionButtonDisabled: {
+    opacity: 0.6
+  },
+  uploadActionButtonText: {
+    color: theme.colors.accentStrong,
+    fontWeight: "800"
+  },
+  uploadRefreshButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.62)",
+    backgroundColor: "rgba(255,255,255,0.22)",
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  uploadRefreshButtonText: {
+    color: theme.colors.textSecondary,
+    fontWeight: "700"
+  },
+  uploadMessage: {
+    marginTop: 8,
+    fontWeight: "600"
+  },
+  uploadMessageSuccess: {
+    color: theme.colors.success
+  },
+  uploadMessageDanger: {
+    color: theme.colors.danger
+  },
+  hapticsRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    gap: 8
+  },
+  hapticsChip: {
+    flex: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.68)",
+    backgroundColor: "rgba(255,255,255,0.24)",
+    paddingVertical: 9,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  hapticsChipActive: {
+    borderColor: "rgba(14,99,255,0.52)",
+    backgroundColor: "rgba(14,99,255,0.18)"
+  },
+  hapticsChipText: {
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    fontSize: 13
+  },
+  hapticsChipTextActive: {
+    color: theme.colors.accentStrong,
+    fontWeight: "800"
   },
   devRow: {
     marginTop: 14,
@@ -356,23 +648,66 @@ const styles = StyleSheet.create({
     color: theme.colors.danger
   },
   logoutButton: {
-    marginTop: 18,
+    marginTop: 14,
     alignSelf: "flex-start",
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(214,69,93,0.42)",
-    backgroundColor: "rgba(214,69,93,0.12)",
-    paddingHorizontal: 14,
-    paddingVertical: 10
+    borderColor: "rgba(255,255,255,0.52)",
+    backgroundColor: "rgba(255,255,255,0.2)",
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
   logoutDisabled: {
     opacity: 0.65
   },
   logoutText: {
-    color: theme.colors.danger,
+    color: theme.colors.tabText,
+    fontWeight: "600",
+    fontSize: 13
+  },
+  timePickerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(7,14,24,0.38)",
+    justifyContent: "flex-end"
+  },
+  timePickerSheet: {
+    height: "88%",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.66)",
+    backgroundColor: "rgba(226,236,248,0.98)",
+    paddingTop: 16,
+    paddingHorizontal: 20
+  },
+  timePickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  timePickerTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 28,
+    fontWeight: "800"
+  },
+  timePickerDone: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(255,255,255,0.34)",
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  timePickerDoneText: {
+    color: theme.colors.textSecondary,
     fontWeight: "700"
   },
-  pressed: {
-    transform: [{ scale: 0.98 }]
+  timePickerCurrent: {
+    marginTop: 8,
+    marginBottom: 8,
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    fontSize: 15
   }
 });

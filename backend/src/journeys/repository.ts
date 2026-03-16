@@ -7,10 +7,28 @@ type JourneyRow = {
   category: string | null;
   color_theme: string | null;
   goal_text: string | null;
+  capture_mode: "video" | "photo";
   started_at: Date | string;
   archived_at: Date | string | null;
+  milestone_length_days: number;
+  milestone_started_on: Date | string;
+  milestone_chapter: number;
+  milestone_start_day: number;
   created_at: Date | string;
   updated_at: Date | string;
+};
+
+type JourneyRevealRow = {
+  id: string;
+  journey_id: string;
+  user_id: string;
+  chapter_number: number;
+  milestone_length_days: number;
+  start_day_index: number;
+  end_day_index: number;
+  recorded_days: number;
+  completed_at: Date | string;
+  created_at: Date | string;
 };
 
 export type Journey = {
@@ -20,10 +38,28 @@ export type Journey = {
   category: string | null;
   colorTheme: string | null;
   goalText: string | null;
+  captureMode: "video" | "photo";
   startedAt: Date;
   archivedAt: Date | null;
+  milestoneLengthDays: number;
+  milestoneStartedOn: string;
+  milestoneChapter: number;
+  milestoneStartDay: number;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type JourneyReveal = {
+  id: string;
+  journeyId: string;
+  userId: string;
+  chapterNumber: number;
+  milestoneLengthDays: number;
+  startDayIndex: number;
+  endDayIndex: number;
+  recordedDays: number;
+  completedAt: Date;
+  createdAt: Date;
 };
 
 type JourneyUpdates = {
@@ -31,10 +67,31 @@ type JourneyUpdates = {
   category?: string | null;
   colorTheme?: string | null;
   goalText?: string | null;
+  captureMode?: "video" | "photo";
+  milestoneLengthDays?: number;
 };
+
+export type StartNextMilestoneResult =
+  | { status: "journey_not_found" }
+  | {
+      status: "milestone_not_reached";
+      progressDays: number;
+      targetDays: number;
+    }
+  | {
+      status: "ok";
+      journey: Journey;
+      reveal: JourneyReveal;
+      progressDays: number;
+    };
 
 function toDate(value: Date | string) {
   return value instanceof Date ? value : new Date(value);
+}
+
+function toDateOnly(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  return date.toISOString().slice(0, 10);
 }
 
 function mapJourney(row: JourneyRow): Journey {
@@ -45,17 +102,41 @@ function mapJourney(row: JourneyRow): Journey {
     category: row.category,
     colorTheme: row.color_theme,
     goalText: row.goal_text,
+    captureMode: row.capture_mode,
     startedAt: toDate(row.started_at),
     archivedAt: row.archived_at ? toDate(row.archived_at) : null,
+    milestoneLengthDays: row.milestone_length_days,
+    milestoneStartedOn: toDateOnly(row.milestone_started_on),
+    milestoneChapter: row.milestone_chapter,
+    milestoneStartDay: row.milestone_start_day,
     createdAt: toDate(row.created_at),
     updatedAt: toDate(row.updated_at)
+  };
+}
+
+function mapJourneyReveal(row: JourneyRevealRow): JourneyReveal {
+  return {
+    id: row.id,
+    journeyId: row.journey_id,
+    userId: row.user_id,
+    chapterNumber: row.chapter_number,
+    milestoneLengthDays: row.milestone_length_days,
+    startDayIndex: row.start_day_index,
+    endDayIndex: row.end_day_index,
+    recordedDays: row.recorded_days,
+    completedAt: toDate(row.completed_at),
+    createdAt: toDate(row.created_at)
   };
 }
 
 export async function listActiveJourneysByUser(pool: Pool, userId: string) {
   const result = await pool.query<JourneyRow>(
     `
-      SELECT id, user_id, title, category, color_theme, goal_text, started_at, archived_at, created_at, updated_at
+      SELECT id, user_id, title, category, color_theme, goal_text,
+             capture_mode,
+             started_at, archived_at,
+             milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+             created_at, updated_at
       FROM journeys
       WHERE user_id = $1 AND archived_at IS NULL
       ORDER BY created_at DESC
@@ -74,15 +155,21 @@ export async function createJourney(
     category: string | null;
     colorTheme: string | null;
     goalText: string | null;
+    captureMode: "video" | "photo";
+    milestoneLengthDays: number;
   }
 ) {
   const result = await pool.query<JourneyRow>(
     `
-      INSERT INTO journeys (user_id, title, category, color_theme, goal_text)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, user_id, title, category, color_theme, goal_text, started_at, archived_at, created_at, updated_at
+      INSERT INTO journeys (user_id, title, category, color_theme, goal_text, capture_mode, milestone_length_days)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, user_id, title, category, color_theme, goal_text,
+                capture_mode,
+                started_at, archived_at,
+                milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+                created_at, updated_at
     `,
-    [params.userId, params.title, params.category, params.colorTheme, params.goalText]
+    [params.userId, params.title, params.category, params.colorTheme, params.goalText, params.captureMode, params.milestoneLengthDays]
   );
 
   return mapJourney(result.rows[0]);
@@ -95,7 +182,11 @@ export async function findJourneyByIdForUser(
   const includeArchived = Boolean(params.includeArchived);
   const result = await pool.query<JourneyRow>(
     `
-      SELECT id, user_id, title, category, color_theme, goal_text, started_at, archived_at, created_at, updated_at
+      SELECT id, user_id, title, category, color_theme, goal_text,
+             capture_mode,
+             started_at, archived_at,
+             milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+             created_at, updated_at
       FROM journeys
       WHERE id = $1 AND user_id = $2
       ${includeArchived ? "" : "AND archived_at IS NULL"}
@@ -116,7 +207,7 @@ export async function updateJourney(
   }
 ) {
   const setFragments: string[] = [];
-  const values: Array<string | null> = [];
+  const values: Array<string | number | null> = [];
   let index = 1;
 
   if (params.updates.title !== undefined) {
@@ -139,6 +230,16 @@ export async function updateJourney(
     values.push(params.updates.goalText);
   }
 
+  if (params.updates.captureMode !== undefined) {
+    setFragments.push(`capture_mode = $${index++}`);
+    values.push(params.updates.captureMode);
+  }
+
+  if (params.updates.milestoneLengthDays !== undefined) {
+    setFragments.push(`milestone_length_days = $${index++}`);
+    values.push(params.updates.milestoneLengthDays);
+  }
+
   if (setFragments.length === 0) return null;
 
   setFragments.push("updated_at = NOW()");
@@ -151,7 +252,11 @@ export async function updateJourney(
       UPDATE journeys
       SET ${setFragments.join(", ")}
       WHERE id = $${index++} AND user_id = $${index++} AND archived_at IS NULL
-      RETURNING id, user_id, title, category, color_theme, goal_text, started_at, archived_at, created_at, updated_at
+      RETURNING id, user_id, title, category, color_theme, goal_text,
+                capture_mode,
+                started_at, archived_at,
+                milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+                created_at, updated_at
     `,
     values
   );
@@ -165,10 +270,144 @@ export async function archiveJourney(pool: Pool, params: { journeyId: string; us
       UPDATE journeys
       SET archived_at = NOW(), updated_at = NOW()
       WHERE id = $1 AND user_id = $2 AND archived_at IS NULL
-      RETURNING id, user_id, title, category, color_theme, goal_text, started_at, archived_at, created_at, updated_at
+      RETURNING id, user_id, title, category, color_theme, goal_text,
+                capture_mode,
+                started_at, archived_at,
+                milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+                created_at, updated_at
     `,
     [params.journeyId, params.userId]
   );
 
   return result.rows[0] ? mapJourney(result.rows[0]) : null;
+}
+
+export async function listJourneyReveals(pool: Pool, params: { journeyId: string; userId: string }) {
+  const result = await pool.query<JourneyRevealRow>(
+    `
+      SELECT id, journey_id, user_id, chapter_number, milestone_length_days,
+             start_day_index, end_day_index, recorded_days, completed_at, created_at
+      FROM journey_reveals
+      WHERE journey_id = $1 AND user_id = $2
+      ORDER BY completed_at DESC
+    `,
+    [params.journeyId, params.userId]
+  );
+
+  return result.rows.map(mapJourneyReveal);
+}
+
+export async function startNextMilestoneChapter(
+  pool: Pool,
+  params: {
+    journeyId: string;
+    userId: string;
+    nextMilestoneLengthDays: number;
+  }
+): Promise<StartNextMilestoneResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const journeyResult = await client.query<JourneyRow>(
+      `
+        SELECT id, user_id, title, category, color_theme, goal_text,
+               capture_mode,
+               started_at, archived_at,
+               milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+               created_at, updated_at
+        FROM journeys
+        WHERE id = $1 AND user_id = $2 AND archived_at IS NULL
+        FOR UPDATE
+      `,
+      [params.journeyId, params.userId]
+    );
+
+    const journeyRow = journeyResult.rows[0];
+    if (!journeyRow) {
+      await client.query("ROLLBACK");
+      return { status: "journey_not_found" };
+    }
+
+    const countResult = await client.query<{ count: string }>(
+      `
+        SELECT COUNT(DISTINCT recorded_on)::text AS count
+        FROM clips
+        WHERE journey_id = $1
+      `,
+      [params.journeyId]
+    );
+
+    const clipCount = Number.parseInt(countResult.rows[0]?.count ?? "0", 10);
+    const progressDays = Math.max(0, clipCount - journeyRow.milestone_start_day + 1);
+
+    if (progressDays < journeyRow.milestone_length_days) {
+      await client.query("ROLLBACK");
+      return {
+        status: "milestone_not_reached",
+        progressDays,
+        targetDays: journeyRow.milestone_length_days
+      };
+    }
+
+    const completedEndDay = journeyRow.milestone_start_day + journeyRow.milestone_length_days - 1;
+
+    const revealResult = await client.query<JourneyRevealRow>(
+      `
+        INSERT INTO journey_reveals (
+          journey_id,
+          user_id,
+          chapter_number,
+          milestone_length_days,
+          start_day_index,
+          end_day_index,
+          recorded_days
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, journey_id, user_id, chapter_number, milestone_length_days,
+                  start_day_index, end_day_index, recorded_days, completed_at, created_at
+      `,
+      [
+        journeyRow.id,
+        journeyRow.user_id,
+        journeyRow.milestone_chapter,
+        journeyRow.milestone_length_days,
+        journeyRow.milestone_start_day,
+        completedEndDay,
+        progressDays
+      ]
+    );
+
+    const updateResult = await client.query<JourneyRow>(
+      `
+        UPDATE journeys
+        SET milestone_length_days = $1,
+            milestone_started_on = CURRENT_DATE,
+            milestone_chapter = milestone_chapter + 1,
+            milestone_start_day = $2,
+            updated_at = NOW()
+        WHERE id = $3
+        RETURNING id, user_id, title, category, color_theme, goal_text,
+                  capture_mode,
+                  started_at, archived_at,
+                  milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
+                  created_at, updated_at
+      `,
+      [params.nextMilestoneLengthDays, clipCount + 1, params.journeyId]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      status: "ok",
+      journey: mapJourney(updateResult.rows[0]),
+      reveal: mapJourneyReveal(revealResult.rows[0]),
+      progressDays
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

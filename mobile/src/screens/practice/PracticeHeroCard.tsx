@@ -14,6 +14,7 @@ type PracticeHeroCardProps = {
   practicedToday: boolean;
   dayCount: number;
   streak: number;
+  identityLabel: string;
   heroMessage: string;
   todayPrompt: string;
   statPulse: Animated.Value;
@@ -28,6 +29,7 @@ export function PracticeHeroCard({
   practicedToday,
   dayCount,
   streak,
+  identityLabel,
   heroMessage,
   todayPrompt,
   statPulse,
@@ -40,24 +42,17 @@ export function PracticeHeroCard({
     <View style={styles.heroCard}>
       <Text style={styles.heroOverline}>Active Skill</Text>
       <Text style={styles.heroTitle}>{title}</Text>
+      <Animated.View style={{ transform: [{ scale: statPulse }] }}>
+        <Text style={styles.heroDayline}>
+          Day {Math.max(dayCount, 1)} {streak > 0 ? `• ${streak}-day streak` : ""}
+        </Text>
+        <View style={styles.identityPill}>
+          <Text style={styles.identityText}>{identityLabel}</Text>
+        </View>
+      </Animated.View>
       <Text style={styles.heroSubtitle} numberOfLines={2}>
         {heroMessage}
       </Text>
-
-      <Animated.View style={[styles.heroStatsRow, { transform: [{ scale: statPulse }] }]}>
-        <View style={styles.heroStatPill}>
-          <Text style={styles.heroStatLabel}>Day</Text>
-          <Text style={styles.heroStatValue}>{Math.max(dayCount, 1)}</Text>
-        </View>
-        <View style={styles.heroStatPill}>
-          <Text style={styles.heroStatLabel}>Streak</Text>
-          <Text style={styles.heroStatValue}>{streak} days</Text>
-        </View>
-        <View style={styles.heroStatPill}>
-          <Text style={styles.heroStatLabel}>Today</Text>
-          <Text style={styles.heroStatValue}>{practicedToday ? "Done" : "Open"}</Text>
-        </View>
-      </Animated.View>
 
       <ActionButton label={practicedToday ? "Record Again Today" : "Record Today"} variant="primary" fullWidth onPress={onRecord} />
 
@@ -120,28 +115,26 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: "700"
   },
-  heroStatsRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    gap: 8
+  heroDayline: {
+    marginTop: 4,
+    color: theme.colors.accentStrong,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "800"
   },
-  heroStatPill: {
-    flex: 1,
-    borderRadius: 14,
+  identityPill: {
+    marginTop: 7,
+    alignSelf: "flex-start",
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.72)",
-    backgroundColor: "rgba(255,255,255,0.44)",
-    paddingVertical: 7,
-    paddingHorizontal: 10
+    borderColor: "rgba(14,99,255,0.42)",
+    backgroundColor: "rgba(14,99,255,0.12)",
+    paddingHorizontal: 10,
+    paddingVertical: 5
   },
-  heroStatLabel: {
-    color: theme.colors.textSecondary,
+  identityText: {
+    color: theme.colors.accentStrong,
     fontSize: 12,
-    fontWeight: "700"
-  },
-  heroStatValue: {
-    marginTop: 2,
-    color: theme.colors.textPrimary,
     fontWeight: "800"
   },
   todayPrompt: {

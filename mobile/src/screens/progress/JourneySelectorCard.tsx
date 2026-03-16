@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { GlassSurface } from "../../components/GlassSurface";
 import { theme } from "../../theme";
 import type { Journey } from "../../types/journey";
+import { triggerSelectionHaptic } from "../../utils/feedback";
 
 type JourneySelectorCardProps = {
   journeys: Journey[];
@@ -25,7 +26,10 @@ export function JourneySelectorCard({ journeys, activeJourneyId, onSelectJourney
                 active ? styles.selectorPillActive : undefined,
                 pressed ? styles.pressScale : undefined
               ]}
-              onPress={() => onSelectJourney(journey.id)}
+              onPress={() => {
+                triggerSelectionHaptic();
+                onSelectJourney(journey.id);
+              }}
             >
               <Text style={[styles.selectorPillText, active ? styles.selectorPillTextActive : undefined]}>{journey.title}</Text>
             </Pressable>
@@ -38,7 +42,7 @@ export function JourneySelectorCard({ journeys, activeJourneyId, onSelectJourney
 
 const styles = StyleSheet.create({
   selectorCard: {
-    marginTop: 20,
+    marginTop: 10,
     borderRadius: 20,
     padding: 12
   },

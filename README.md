@@ -6,6 +6,8 @@ This repository contains the initial Sprint 1 baseline for Hone:
 - `backend/`: Node.js + TypeScript API service.
 - `infra/terraform/`: AWS IaC for storage buckets and CDN.
 - `docs/`: product and planning documents.
+  - Product guardrails: [docs/human-first-product-guardrails.md](docs/human-first-product-guardrails.md)
+  - Current execution board: [docs/execution-board-2026-03-11.md](docs/execution-board-2026-03-11.md)
 
 ## Tech Decisions (Locked)
 

@@ -54,7 +54,7 @@ function normalizeClipMediaUrl<T extends { videoUrl: string; thumbnailUrl: strin
 export function requestClipUploadUrl(
   token: string,
   journeyId: string,
-  params: { mimeType: string; fileExtension: string }
+  params: { mimeType: string; fileExtension: string; captureType: "video" | "photo" }
 ) {
   return requestJson<UploadUrlResponse>(`/journeys/${journeyId}/clips/upload-url`, {
     token,
@@ -69,6 +69,7 @@ export async function uploadClipFile(params: {
   fileField: string;
   fileUri: string;
   mimeType: string;
+  fileName?: string;
 }) {
   const uploadOrigin = (() => {
     try {
@@ -82,7 +83,7 @@ export async function uploadClipFile(params: {
   form.append(params.fileField, {
     uri: params.fileUri,
     type: params.mimeType,
-    name: "clip.mp4"
+    name: params.fileName ?? "clip.mp4"
   } as unknown as Blob);
 
   let response: Response;
@@ -112,7 +113,7 @@ export async function uploadClipFile(params: {
 export function createClip(
   token: string,
   journeyId: string,
-  payload: { uploadId: string; durationMs: number; recordedAt: string }
+  payload: { uploadId: string; durationMs: number; recordedAt: string; captureType?: "video" | "photo" }
 ) {
   return requestJson<ClipResponse>(`/journeys/${journeyId}/clips`, {
     token,

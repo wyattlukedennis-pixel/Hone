@@ -4,6 +4,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { GlassSurface } from "../components/GlassSurface";
 import { theme } from "../theme";
 import type { AuthMode } from "../types/auth";
+import { triggerSelectionHaptic } from "../utils/feedback";
 
 type AuthFormValues = {
   email: string;
@@ -36,6 +37,7 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
   const isSignup = mode === "signup";
 
   async function handleSubmit() {
+    triggerSelectionHaptic();
     await onSubmit({
       email,
       password,
@@ -69,13 +71,19 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
         <View style={styles.modeRow}>
           <Pressable
             style={[styles.modeButton, mode === "login" ? styles.modeButtonActive : undefined]}
-            onPress={() => onModeChange("login")}
+            onPress={() => {
+              triggerSelectionHaptic();
+              onModeChange("login");
+            }}
           >
             <Text style={[styles.modeText, mode === "login" ? styles.modeTextActive : undefined]}>Login</Text>
           </Pressable>
           <Pressable
             style={[styles.modeButton, mode === "signup" ? styles.modeButtonActive : undefined]}
-            onPress={() => onModeChange("signup")}
+            onPress={() => {
+              triggerSelectionHaptic();
+              onModeChange("signup");
+            }}
           >
             <Text style={[styles.modeText, mode === "signup" ? styles.modeTextActive : undefined]}>Sign up</Text>
           </Pressable>

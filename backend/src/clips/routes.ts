@@ -30,6 +30,7 @@ type UploadParams = {
 type CreateUploadUrlBody = {
   mimeType?: string;
   fileExtension?: string;
+  captureType?: "video" | "photo";
 };
 
 type CreateClipBody = {
@@ -42,6 +43,14 @@ function sanitizeExtension(input: string) {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return "mp4";
   return normalized.replace(/[^a-z0-9]/g, "") || "mp4";
+}
+
+function normalizeCaptureType(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "video" || normalized === "photo") return normalized;
+  return null;
 }
 
 function getBaseUrl(protocol: string, host: string | undefined) {
@@ -61,17 +70,28 @@ export function registerClipRoutes(app: FastifyInstance) {
     });
     if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
 
+    const requestedCaptureType = normalizeCaptureType(request.body?.captureType);
+    if (request.body?.captureType !== undefined && !requestedCaptureType) {
+      return reply.code(400).send({ error: "INVALID_CAPTURE_TYPE" });
+    }
+    const captureType = requestedCaptureType ?? (journey.captureMode === "photo" ? "photo" : "video");
+    if (journey.captureMode !== captureType) {
+      return reply.code(400).send({ error: "CAPTURE_TYPE_NOT_ALLOWED" });
+    }
+    const defaultMimeType = captureType === "photo" ? "image/jpeg" : "video/mp4";
+    const defaultFileExtension = captureType === "photo" ? "jpg" : "mp4";
     const mimeType =
-      typeof request.body?.mimeType === "string" && request.body.mimeType.trim() ? request.body.mimeType.trim() : "video/mp4";
+      typeof request.body?.mimeType === "string" && request.body.mimeType.trim() ? request.body.mimeType.trim() : defaultMimeType;
     const extension = sanitizeExtension(
-      typeof request.body?.fileExtension === "string" ? request.body.fileExtension : mimeType.split("/")[1] ?? "mp4"
+      typeof request.body?.fileExtension === "string" ? request.body.fileExtension : mimeType.split("/")[1] ?? defaultFileExtension
     );
 
     const upload = await createClipUpload(pool, {
       journeyId: journey.id,
       userId: auth.user.id,
       objectKey: `${auth.user.id}/${journey.id}/${randomUUID()}.${extension}`,
-      mimeType
+      mimeType,
+      captureType
     });
 
     const baseUrl = getBaseUrl(request.protocol, request.headers.host);
@@ -120,11 +140,6 @@ export function registerClipRoutes(app: FastifyInstance) {
     const uploadId = typeof request.body?.uploadId === "string" ? request.body.uploadId : "";
     if (!uploadId) return reply.code(400).send({ error: "UPLOAD_ID_REQUIRED" });
 
-    const durationMs = Number(request.body?.durationMs ?? 0);
-    if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 60_000) {
-      return reply.code(400).send({ error: "INVALID_DURATION_MS" });
-    }
-
     const pool = getPool();
     const journey = await findJourneyByIdForUser(pool, {
       journeyId: request.params.journeyId,
@@ -140,6 +155,13 @@ export function registerClipRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "UPLOAD_NOT_READY" });
     }
 
+    const rawDurationMs = Number(request.body?.durationMs ?? NaN);
+    const defaultDurationMs = upload.captureType === "photo" ? 1000 : NaN;
+    const durationMs = Number.isFinite(rawDurationMs) ? rawDurationMs : defaultDurationMs;
+    if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 60_000) {
+      return reply.code(400).send({ error: "INVALID_DURATION_MS" });
+    }
+
     const recordedAtRaw = typeof request.body?.recordedAt === "string" ? request.body.recordedAt : null;
     const recordedAt = recordedAtRaw ? new Date(recordedAtRaw) : new Date();
     if (Number.isNaN(recordedAt.getTime())) {
@@ -153,6 +175,7 @@ export function registerClipRoutes(app: FastifyInstance) {
       recordedOn,
       recordedAt,
       durationMs: Math.round(durationMs),
+      captureType: upload.captureType,
       videoUrl: `${baseUrl}/media/${upload.objectKey}`
     });
 

@@ -4,6 +4,7 @@ export type Clip = {
   recordedOn: string;
   recordedAt: string;
   durationMs: number;
+  captureType: "video" | "photo";
   videoUrl: string;
   thumbnailUrl: string | null;
   createdAt: string;

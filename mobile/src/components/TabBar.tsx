@@ -4,6 +4,8 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { GlassSurface } from "./GlassSurface";
 import { theme } from "../theme";
 import type { TabKey } from "../types/navigation";
+import { triggerSelectionHaptic } from "../utils/feedback";
+import { useReducedMotion } from "../utils/useReducedMotion";
 
 type TabBarProps = {
   activeTab: TabKey;
@@ -18,6 +20,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
 
 export function TabBar({ activeTab, onSelect }: TabBarProps) {
   const [width, setWidth] = useState(0);
+  const reducedMotion = useReducedMotion();
   const indicatorX = useRef(new Animated.Value(0)).current;
 
   const activeIndex = useMemo(() => {
@@ -28,6 +31,10 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
   useEffect(() => {
     if (!width) return;
     const tabWidth = width / tabs.length;
+    if (reducedMotion) {
+      indicatorX.setValue(tabWidth * activeIndex);
+      return;
+    }
     Animated.spring(indicatorX, {
       toValue: tabWidth * activeIndex,
       damping: 14,
@@ -35,7 +42,7 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
       mass: 0.6,
       useNativeDriver: true
     }).start();
-  }, [activeIndex, indicatorX, width]);
+  }, [activeIndex, indicatorX, reducedMotion, width]);
 
   const tabWidth = width ? width / tabs.length : 0;
   const indicatorWidth = Math.max(tabWidth - 10, 0);
@@ -58,7 +65,14 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
           {tabs.map((tab) => {
             const active = tab.key === activeTab;
             return (
-              <Pressable key={tab.key} onPress={() => onSelect(tab.key)} style={styles.item}>
+              <Pressable
+                key={tab.key}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  onSelect(tab.key);
+                }}
+                style={styles.item}
+              >
                 <Text style={[styles.label, active ? styles.labelActive : undefined]}>{tab.label}</Text>
               </Pressable>
             );
@@ -72,45 +86,48 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
 const styles = StyleSheet.create({
   safeWrap: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12
+    paddingTop: 6,
+    paddingBottom: 10
   },
   container: {
-    borderRadius: 22,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.66)",
     shadowColor: "#113761",
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.14,
     shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 7 },
     elevation: 6
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     position: "relative",
-    padding: 6
+    padding: 5
   },
   item: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 13,
+    paddingVertical: 12,
     zIndex: 2
   },
   indicator: {
     position: "absolute",
-    left: 6,
-    top: 6,
-    bottom: 6,
-    borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.7)",
+    left: 5,
+    top: 5,
+    bottom: 5,
+    borderRadius: 16,
+    backgroundColor: "rgba(236,245,255,0.86)",
     zIndex: 1
   },
   label: {
     color: theme.colors.tabText,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700"
   },
   labelActive: {
-    color: theme.colors.tabTextActive
+    color: theme.colors.tabTextActive,
+    fontWeight: "800"
   }
 });

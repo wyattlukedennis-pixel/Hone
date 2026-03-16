@@ -6,6 +6,7 @@ type ClipUploadRow = {
   user_id: string;
   object_key: string;
   mime_type: string;
+  capture_type: "video" | "photo";
   upload_status: string;
   created_at: Date | string;
   uploaded_at: Date | string | null;
@@ -17,6 +18,7 @@ type ClipRow = {
   recorded_on: Date | string;
   recorded_at: Date | string;
   duration_ms: number;
+  capture_type: "video" | "photo";
   video_url: string;
   thumbnail_url: string | null;
   created_at: Date | string;
@@ -29,6 +31,7 @@ export type ClipUpload = {
   userId: string;
   objectKey: string;
   mimeType: string;
+  captureType: "video" | "photo";
   uploadStatus: string;
   createdAt: Date;
   uploadedAt: Date | null;
@@ -40,6 +43,7 @@ export type Clip = {
   recordedOn: string;
   recordedAt: Date;
   durationMs: number;
+  captureType: "video" | "photo";
   videoUrl: string;
   thumbnailUrl: string | null;
   createdAt: Date;
@@ -57,6 +61,7 @@ function mapClipUpload(row: ClipUploadRow): ClipUpload {
     userId: row.user_id,
     objectKey: row.object_key,
     mimeType: row.mime_type,
+    captureType: row.capture_type,
     uploadStatus: row.upload_status,
     createdAt: toDate(row.created_at),
     uploadedAt: row.uploaded_at ? toDate(row.uploaded_at) : null
@@ -75,6 +80,7 @@ function mapClip(row: ClipRow): Clip {
     recordedOn: normalizeRecordedOn(row.recorded_on),
     recordedAt: toDate(row.recorded_at),
     durationMs: row.duration_ms,
+    captureType: row.capture_type,
     videoUrl: row.video_url,
     thumbnailUrl: row.thumbnail_url,
     createdAt: toDate(row.created_at),
@@ -84,15 +90,15 @@ function mapClip(row: ClipRow): Clip {
 
 export async function createClipUpload(
   pool: Pool,
-  params: { journeyId: string; userId: string; objectKey: string; mimeType: string }
+  params: { journeyId: string; userId: string; objectKey: string; mimeType: string; captureType: "video" | "photo" }
 ) {
   const result = await pool.query<ClipUploadRow>(
     `
-      INSERT INTO clip_uploads (journey_id, user_id, object_key, mime_type)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, journey_id, user_id, object_key, mime_type, upload_status, created_at, uploaded_at
+      INSERT INTO clip_uploads (journey_id, user_id, object_key, mime_type, capture_type)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, journey_id, user_id, object_key, mime_type, capture_type, upload_status, created_at, uploaded_at
     `,
-    [params.journeyId, params.userId, params.objectKey, params.mimeType]
+    [params.journeyId, params.userId, params.objectKey, params.mimeType, params.captureType]
   );
 
   return mapClipUpload(result.rows[0]);
@@ -101,7 +107,7 @@ export async function createClipUpload(
 export async function findClipUploadById(pool: Pool, uploadId: string) {
   const result = await pool.query<ClipUploadRow>(
     `
-      SELECT id, journey_id, user_id, object_key, mime_type, upload_status, created_at, uploaded_at
+      SELECT id, journey_id, user_id, object_key, mime_type, capture_type, upload_status, created_at, uploaded_at
       FROM clip_uploads
       WHERE id = $1
       LIMIT 1
@@ -118,7 +124,7 @@ export async function markClipUploadUploaded(pool: Pool, uploadId: string) {
       UPDATE clip_uploads
       SET upload_status = 'uploaded', uploaded_at = NOW()
       WHERE id = $1
-      RETURNING id, journey_id, user_id, object_key, mime_type, upload_status, created_at, uploaded_at
+      RETURNING id, journey_id, user_id, object_key, mime_type, capture_type, upload_status, created_at, uploaded_at
     `,
     [uploadId]
   );
@@ -133,22 +139,23 @@ export async function upsertClipFromUpload(
     recordedOn: string;
     recordedAt: Date;
     durationMs: number;
+    captureType: "video" | "photo";
     videoUrl: string;
   }
 ) {
   const result = await pool.query<ClipRow>(
     `
-      INSERT INTO clips (journey_id, recorded_on, recorded_at, duration_ms, video_url)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (journey_id, recorded_on)
+      INSERT INTO clips (journey_id, recorded_on, recorded_at, duration_ms, capture_type, video_url)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (journey_id, recorded_on, capture_type)
       DO UPDATE SET
         recorded_at = EXCLUDED.recorded_at,
         duration_ms = EXCLUDED.duration_ms,
         video_url = EXCLUDED.video_url,
         updated_at = NOW()
-      RETURNING id, journey_id, recorded_on, recorded_at, duration_ms, video_url, thumbnail_url, created_at, updated_at
+      RETURNING id, journey_id, recorded_on, recorded_at, duration_ms, capture_type, video_url, thumbnail_url, created_at, updated_at
     `,
-    [params.journeyId, params.recordedOn, params.recordedAt.toISOString(), params.durationMs, params.videoUrl]
+    [params.journeyId, params.recordedOn, params.recordedAt.toISOString(), params.durationMs, params.captureType, params.videoUrl]
   );
 
   return mapClip(result.rows[0]);
@@ -157,7 +164,7 @@ export async function upsertClipFromUpload(
 export async function listClipsForJourney(pool: Pool, journeyId: string) {
   const result = await pool.query<ClipRow>(
     `
-      SELECT id, journey_id, recorded_on, recorded_at, duration_ms, video_url, thumbnail_url, created_at, updated_at
+      SELECT id, journey_id, recorded_on, recorded_at, duration_ms, capture_type, video_url, thumbnail_url, created_at, updated_at
       FROM clips
       WHERE journey_id = $1
       ORDER BY recorded_at DESC

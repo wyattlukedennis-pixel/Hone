@@ -1,37 +1,50 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import type { StyleProp, ViewStyle } from "react-native";
+import { triggerSelectionHaptic } from "../utils/feedback";
 
 type LoopingVideoPlayerProps = {
   uri: string;
+  posterUri?: string | null;
   style: StyleProp<ViewStyle>;
+  mediaType?: "video" | "photo";
   resizeMode?: ResizeMode;
   autoPlay?: boolean;
   active?: boolean;
   loop?: boolean;
   muted?: boolean;
   showControls?: boolean;
+  controlsVariant?: "full" | "minimal";
 };
 
 type OverlayState = "play" | "pause" | null;
 
 export function LoopingVideoPlayer({
   uri,
+  posterUri,
   style,
+  mediaType = "video",
   resizeMode = ResizeMode.COVER,
   autoPlay = true,
   active = true,
   loop = true,
   muted = true,
-  showControls = false
+  showControls = false,
+  controlsVariant = "full"
 }: LoopingVideoPlayerProps) {
   const [desiredPlaying, setDesiredPlaying] = useState(autoPlay && active);
   const [isMuted, setIsMuted] = useState(muted);
   const [progress, setProgress] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [showLoadingOverlay, setShowLoadingOverlay] = useState(true);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [overlayState, setOverlayState] = useState<OverlayState>(null);
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const lastProgressUpdateAtRef = useRef(0);
+  const readyRef = useRef(false);
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setIsMuted(muted);
@@ -39,10 +52,41 @@ export function LoopingVideoPlayer({
 
   useEffect(() => {
     setDesiredPlaying(autoPlay && active);
+  }, [active, autoPlay]);
+
+  useEffect(() => {
     setProgress(0);
+    setErrorMessage(null);
+    readyRef.current = false;
+    setReady(false);
+    setShowLoadingOverlay(true);
+    setReloadNonce(0);
     setOverlayState(null);
     overlayOpacity.setValue(0);
-  }, [active, autoPlay, uri, overlayOpacity]);
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+  }, [uri, overlayOpacity]);
+
+  useEffect(() => {
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function markReady() {
+    if (readyRef.current) return;
+    readyRef.current = true;
+    setReady(true);
+    setShowLoadingOverlay(false);
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+  }
 
   function showTapFeedback(state: Exclude<OverlayState, null>) {
     setOverlayState(state);
@@ -57,6 +101,15 @@ export function LoopingVideoPlayer({
   }
 
   function togglePlayback() {
+    if (mediaType === "photo") return;
+    if (errorMessage) {
+      triggerSelectionHaptic();
+      setErrorMessage(null);
+      setReloadNonce((value) => value + 1);
+      setDesiredPlaying(autoPlay && active);
+      return;
+    }
+    triggerSelectionHaptic();
     setDesiredPlaying((current) => {
       const next = !current;
       showTapFeedback(next ? "pause" : "play");
@@ -66,6 +119,7 @@ export function LoopingVideoPlayer({
 
   function handlePlaybackStatus(status: AVPlaybackStatus) {
     if (!status.isLoaded) return;
+    markReady();
     const now = Date.now();
     if (now - lastProgressUpdateAtRef.current < 120) return;
     lastProgressUpdateAtRef.current = now;
@@ -77,18 +131,86 @@ export function LoopingVideoPlayer({
 
   return (
     <View style={[styles.frame, style]}>
-      <Video
-        source={{ uri }}
-        style={StyleSheet.absoluteFill}
-        resizeMode={resizeMode}
-        isLooping={loop}
-        isMuted={isMuted}
-        shouldPlay={desiredPlaying}
-        progressUpdateIntervalMillis={showControls ? 180 : 500}
-        onPlaybackStatusUpdate={showControls ? handlePlaybackStatus : undefined}
-      />
+      {mediaType === "photo" ? (
+        <Image
+          key={`${uri}:${reloadNonce}`}
+          source={{ uri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode={resizeMode === ResizeMode.CONTAIN ? "contain" : "cover"}
+          onLoadStart={() => {
+            readyRef.current = false;
+            setReady(false);
+            setShowLoadingOverlay(true);
+            if (loadingTimeoutRef.current) {
+              clearTimeout(loadingTimeoutRef.current);
+            }
+            loadingTimeoutRef.current = setTimeout(() => {
+              setShowLoadingOverlay(false);
+            }, 2600);
+          }}
+          onLoad={() => {
+            markReady();
+            setErrorMessage(null);
+          }}
+          onError={() => {
+            setErrorMessage("IMAGE_LOAD_FAILED");
+            readyRef.current = false;
+            setReady(false);
+            setShowLoadingOverlay(false);
+            if (loadingTimeoutRef.current) {
+              clearTimeout(loadingTimeoutRef.current);
+              loadingTimeoutRef.current = null;
+            }
+          }}
+        />
+      ) : (
+        <Video
+          key={`${uri}:${reloadNonce}`}
+          source={{ uri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode={resizeMode}
+          usePoster={Boolean(posterUri)}
+          posterSource={posterUri ? { uri: posterUri } : undefined}
+          isLooping={loop}
+          isMuted={isMuted}
+          shouldPlay={desiredPlaying}
+          progressUpdateIntervalMillis={showControls ? 180 : 500}
+          onLoadStart={() => {
+            if (readyRef.current) return;
+            readyRef.current = false;
+            setReady(false);
+            setShowLoadingOverlay(true);
+            if (loadingTimeoutRef.current) {
+              clearTimeout(loadingTimeoutRef.current);
+            }
+            loadingTimeoutRef.current = setTimeout(() => {
+              // Prevent indefinite spinner if native status callbacks are flaky.
+              setShowLoadingOverlay(false);
+            }, 2600);
+          }}
+          onLoad={() => {
+            markReady();
+          }}
+          onReadyForDisplay={() => {
+            markReady();
+            setErrorMessage(null);
+          }}
+          onPlaybackStatusUpdate={handlePlaybackStatus}
+          onError={(error) => {
+            setErrorMessage(error);
+            setDesiredPlaying(false);
+            readyRef.current = false;
+            setReady(false);
+            setShowLoadingOverlay(false);
+            if (loadingTimeoutRef.current) {
+              clearTimeout(loadingTimeoutRef.current);
+              loadingTimeoutRef.current = null;
+            }
+          }}
+        />
+      )}
 
-      {showControls ? (
+      {showControls && mediaType === "video" ? (
         <>
           <Pressable style={StyleSheet.absoluteFill} onPress={togglePlayback} />
 
@@ -98,20 +220,33 @@ export function LoopingVideoPlayer({
             </Animated.View>
           ) : null}
 
-          <View style={styles.bottomOverlay}>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.max(3, progress * 100)}%` }]} />
+          {controlsVariant === "full" ? (
+            <View style={styles.bottomOverlay}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.max(3, progress * 100)}%` }]} />
+              </View>
+              <Pressable
+                style={styles.soundChip}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  setIsMuted((current) => !current);
+                }}
+              >
+                <Text style={styles.soundChipText}>{isMuted ? "Sound Off" : "Sound On"}</Text>
+              </Pressable>
             </View>
-            <Pressable
-              style={styles.soundChip}
-              onPress={() => {
-                setIsMuted((current) => !current);
-              }}
-            >
-              <Text style={styles.soundChipText}>{isMuted ? "Sound Off" : "Sound On"}</Text>
-            </Pressable>
-          </View>
+          ) : null}
         </>
+      ) : null}
+
+      {errorMessage ? (
+        <View style={styles.errorOverlay}>
+          <Text style={styles.errorText}>Video unavailable. Tap to retry.</Text>
+        </View>
+      ) : !ready && showLoadingOverlay ? (
+        <View style={styles.loadingOverlay}>
+          <Text style={styles.loadingText}>Loading clip...</Text>
+        </View>
       ) : null}
     </View>
   );
@@ -174,5 +309,29 @@ const styles = StyleSheet.create({
     color: "#e8f2ff",
     fontWeight: "700",
     fontSize: 11
+  },
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(5,12,22,0.42)"
+  },
+  errorText: {
+    color: "#d6e7fb",
+    fontWeight: "700",
+    fontSize: 12,
+    textAlign: "center"
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(5,12,22,0.16)"
+  },
+  loadingText: {
+    color: "#d6e7fb",
+    fontWeight: "700",
+    fontSize: 12
   }
 });

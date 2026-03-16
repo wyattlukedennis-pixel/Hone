@@ -11,7 +11,7 @@ type GlassSurfaceProps = {
   intensity?: number;
 };
 
-export function GlassSurface({ children, style, intensity = 38 }: GlassSurfaceProps) {
+export function GlassSurface({ children, style, intensity = 20 }: GlassSurfaceProps) {
   return (
     <BlurView intensity={intensity} tint="light" style={[styles.container, style]}>
       <LinearGradient
@@ -31,10 +31,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.glassBorder,
     shadowColor: "#10355c",
-    shadowOpacity: 0.09,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6
   },
   inner: {}
 });

@@ -10,18 +10,32 @@ import { clearJourneyClips } from "./api/clips";
 import { listJourneys } from "./api/journeys";
 import { GlassSurface } from "./components/GlassSurface";
 import { TabBar } from "./components/TabBar";
+import { TactilePressable } from "./components/TactilePressable";
 import { env } from "./env";
+import {
+  addDailyMomentNotificationResponseListener,
+  cancelDailyMomentNotification,
+  handleInitialDailyMomentNotificationResponse,
+  scheduleDailyMomentNotification
+} from "./notifications/dailyMomentNotifications";
 import { AuthScreen } from "./screens/AuthScreen";
 import { JourneysScreen } from "./screens/JourneysScreen";
 import { ProgressScreen } from "./screens/ProgressScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { clearActiveJourneyId, readActiveJourneyId, saveActiveJourneyId } from "./storage/activeJourneyStorage";
 import { clearAuthToken, readAuthToken, saveAuthToken } from "./storage/authStorage";
+import { getPendingClipUploadCount, processClipUploadQueue } from "./storage/clipUploadQueue";
+import { readDailyMomentSettings, saveDailyMomentSettings } from "./storage/dailyMomentStorage";
 import { readDevDateShiftSettings, saveDevDateShiftSettings } from "./storage/devToolsStorage";
+import { readHapticsMode, saveHapticsMode } from "./storage/hapticsStorage";
 import { theme } from "./theme";
 import type { AuthMode, User } from "./types/auth";
+import { defaultDailyMomentSettings, type DailyMomentSettings } from "./types/dailyMoment";
 import { defaultDevDateShiftSettings, type DevDateShiftSettings } from "./types/devTools";
+import { defaultHapticsMode, type HapticsMode } from "./types/haptics";
 import type { TabKey } from "./types/navigation";
+import { setHapticsMode as applyHapticsMode } from "./utils/feedback";
+import { useReducedMotion } from "./utils/useReducedMotion";
 
 type SessionState = {
   token: string;
@@ -61,7 +75,15 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>("journeys");
   const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
   const [devDateShiftSettings, setDevDateShiftSettings] = useState<DevDateShiftSettings>(defaultDevDateShiftSettings);
+  const [dailyMomentSettings, setDailyMomentSettings] = useState<DailyMomentSettings>(defaultDailyMomentSettings);
+  const [hapticsMode, setHapticsMode] = useState<HapticsMode>(defaultHapticsMode);
+  const [openRecorderSignal, setOpenRecorderSignal] = useState(0);
+  const [openRevealSignal, setOpenRevealSignal] = useState(0);
+  const [progressEntrySignal, setProgressEntrySignal] = useState(0);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
+  const [mediaMode, setMediaMode] = useState<"video" | "photo">("video");
+  const previousTabRef = useRef<TabKey>("journeys");
+  const reducedMotion = useReducedMotion();
   const screenOpacity = useRef(new Animated.Value(1)).current;
   const screenTranslateY = useRef(new Animated.Value(0)).current;
   const screenScale = useRef(new Animated.Value(1)).current;
@@ -70,13 +92,18 @@ export default function App() {
     trackEvent("app_opened", { appEnv: env.appEnv });
     async function bootstrapAuth() {
       try {
-        const [token, storedJourneyId, storedDevDateShift] = await Promise.all([
+        const [token, storedJourneyId, storedDevDateShift, storedDailyMoment, storedHapticsMode] = await Promise.all([
           readAuthToken(),
           readActiveJourneyId(),
-          __DEV__ ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings)
+          __DEV__ ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings),
+          readDailyMomentSettings(),
+          readHapticsMode()
         ]);
         if (storedJourneyId) setActiveJourneyId(storedJourneyId);
         if (__DEV__) setDevDateShiftSettings(storedDevDateShift);
+        setDailyMomentSettings(storedDailyMoment);
+        setHapticsMode(storedHapticsMode);
+        applyHapticsMode(storedHapticsMode);
         if (!token) return;
 
         const me = await fetchMe(token);
@@ -95,27 +122,85 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    applyHapticsMode(hapticsMode);
+  }, [hapticsMode]);
+
+  useEffect(() => {
+    if (reducedMotion) {
+      screenOpacity.setValue(1);
+      screenTranslateY.setValue(0);
+      screenScale.setValue(1);
+      return;
+    }
     screenOpacity.setValue(0.84);
     screenTranslateY.setValue(10);
     screenScale.setValue(0.992);
     Animated.parallel([
       Animated.timing(screenOpacity, {
         toValue: 1,
-        duration: 200,
+        duration: theme.motion.microMs,
         useNativeDriver: true
       }),
       Animated.timing(screenTranslateY, {
         toValue: 0,
-        duration: 220,
+        duration: theme.motion.transitionMs,
         useNativeDriver: true
       }),
       Animated.timing(screenScale, {
         toValue: 1,
-        duration: 220,
+        duration: theme.motion.transitionMs,
         useNativeDriver: true
       })
     ]).start();
-  }, [screenOpacity, screenScale, screenTranslateY, session, tab]);
+  }, [reducedMotion, screenOpacity, screenScale, screenTranslateY, session, tab]);
+
+  useEffect(() => {
+    if (tab === "progress" && previousTabRef.current !== "progress") {
+      setProgressEntrySignal((value) => value + 1);
+    }
+    previousTabRef.current = tab;
+  }, [tab]);
+
+  useEffect(() => {
+    function handleOpenRecorderFromNotification(source: string) {
+      setTab("journeys");
+      setOpenRecorderSignal((value) => value + 1);
+      trackEvent("daily_moment_prompted", { source, action: "open_recorder" });
+    }
+
+    const removeResponseListener = addDailyMomentNotificationResponseListener(handleOpenRecorderFromNotification);
+    void handleInitialDailyMomentNotificationResponse(handleOpenRecorderFromNotification);
+    return () => {
+      removeResponseListener();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncDailyMomentSchedule() {
+      if (!session) {
+        await cancelDailyMomentNotification();
+        return;
+      }
+      const result = await scheduleDailyMomentNotification(dailyMomentSettings);
+      if (cancelled) return;
+      if (!result.scheduled && result.reason === "permission_denied") {
+        trackEvent("daily_moment_notification_permission_denied");
+      }
+    }
+
+    void syncDailyMomentSchedule();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    session?.user.id,
+    dailyMomentSettings.enabled,
+    dailyMomentSettings.hour,
+    dailyMomentSettings.minute,
+    dailyMomentSettings.windowMinutes
+  ]);
 
   async function handleAuthSubmit(values: { email: string; password: string; displayName: string }) {
     setAuthError(null);
@@ -251,23 +336,90 @@ export default function App() {
     await saveDevDateShiftSettings(next);
   }
 
+  async function handleDailyMomentSettingsChange(next: DailyMomentSettings) {
+    setDailyMomentSettings(next);
+    await saveDailyMomentSettings(next);
+  }
+
+  async function handleHapticsModeChange(next: HapticsMode) {
+    setHapticsMode(next);
+    applyHapticsMode(next);
+    await saveHapticsMode(next);
+  }
+
+  async function handleGetPendingUploadsCount() {
+    try {
+      return await getPendingClipUploadCount();
+    } catch {
+      return 0;
+    }
+  }
+
+  async function handleRetryPendingUploads() {
+    if (!session) {
+      return { success: false, message: "Not signed in.", remaining: 0 };
+    }
+    try {
+      const before = await getPendingClipUploadCount();
+      const result = await processClipUploadQueue(session.token);
+      const remaining = result.remaining;
+      if (result.succeeded > 0) {
+        setRecordingsRevision((value) => value + 1);
+      }
+      trackEvent("clip_upload_retry_manual", {
+        before,
+        remaining,
+        succeeded: result.succeeded,
+        failed: result.failed
+      });
+
+      if (before === 0) {
+        return { success: true, message: "No pending uploads.", remaining };
+      }
+      if (remaining === 0) {
+        return { success: true, message: `All pending uploads synced (${result.succeeded}).`, remaining };
+      }
+      if (result.succeeded > 0) {
+        return {
+          success: true,
+          message: `Synced ${result.succeeded}. ${remaining} still pending.`,
+          remaining
+        };
+      }
+      return {
+        success: false,
+        message: `Retry finished. ${remaining} still pending.`,
+        remaining
+      };
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "Unexpected error";
+      return { success: false, message: `Retry failed: ${raw}`, remaining: 0 };
+    }
+  }
+
   const content = useMemo(() => {
     if (tab === "journeys") {
       return session ? (
         <JourneysScreen
           token={session.token}
           activeJourneyId={activeJourneyId}
+          mediaMode={mediaMode}
           onActiveJourneyChange={(journeyId) => {
             void handleActiveJourneyChange(journeyId);
           }}
-          onOpenProgress={(journeyId) => {
+          onOpenProgress={(journeyId, options) => {
             void handleActiveJourneyChange(journeyId);
+            if (options?.openReveal) {
+              setOpenRevealSignal((value) => value + 1);
+            }
             setTab("progress");
           }}
           devDateShiftSettings={devDateShiftSettings}
           onDevDateShiftSettingsChange={(next) => {
             void handleDevDateShiftSettingsChange(next);
           }}
+          dailyMomentSettings={dailyMomentSettings}
+          openRecorderSignal={openRecorderSignal}
           recordingsRevision={recordingsRevision}
         />
       ) : null;
@@ -277,11 +429,14 @@ export default function App() {
         <ProgressScreen
           token={session.token}
           activeJourneyId={activeJourneyId}
+          mediaMode={mediaMode}
           onActiveJourneyChange={(journeyId) => {
             void handleActiveJourneyChange(journeyId);
           }}
           onOpenJourneysTab={() => setTab("journeys")}
           devNowDayOffset={devDateShiftSettings.enabled ? devDateShiftSettings.dayOffset : 0}
+          openRevealSignal={openRevealSignal}
+          progressEntrySignal={progressEntrySignal}
           recordingsRevision={recordingsRevision}
         />
       ) : null;
@@ -296,9 +451,19 @@ export default function App() {
           void handleDevDateShiftSettingsChange(next);
         }}
         onClearAllRecordings={handleClearAllRecordings}
+        onGetPendingUploadsCount={handleGetPendingUploadsCount}
+        onRetryPendingUploads={handleRetryPendingUploads}
+        dailyMomentSettings={dailyMomentSettings}
+        onDailyMomentSettingsChange={(next) => {
+          void handleDailyMomentSettingsChange(next);
+        }}
+        hapticsMode={hapticsMode}
+        onHapticsModeChange={(next) => {
+          void handleHapticsModeChange(next);
+        }}
       />
     ) : null;
-  }, [tab, session, logoutLoading, activeJourneyId, devDateShiftSettings, recordingsRevision]);
+  }, [tab, session, logoutLoading, activeJourneyId, mediaMode, devDateShiftSettings, dailyMomentSettings, hapticsMode, openRecorderSignal, openRevealSignal, progressEntrySignal, recordingsRevision]);
 
   return (
     <SafeAreaProvider>
@@ -315,11 +480,33 @@ export default function App() {
         ) : (
           <SafeAreaView style={styles.safeArea}>
             <View style={styles.topBar}>
-              <GlassSurface style={styles.envPill} intensity={40}>
-                <Text style={styles.envText}>{env.appEnv.toUpperCase()}</Text>
-                {__DEV__ ? <Text style={styles.envSubText}>{env.apiBaseUrl.replace(/^https?:\/\//, "")}</Text> : null}
-                {__DEV__ ? <Text style={styles.envHintText}>{env.apiBaseUrlSource}</Text> : null}
-              </GlassSurface>
+              <View style={styles.topBarRow}>
+                {session ? (
+                  <GlassSurface style={styles.mediaModeSwitch} intensity={34}>
+                    {(["video", "photo"] as const).map((mode) => {
+                      const selected = mediaMode === mode;
+                      return (
+                        <TactilePressable
+                          key={mode}
+                          style={[styles.mediaModeChip, selected ? styles.mediaModeChipSelected : undefined]}
+                          onPress={() => setMediaMode(mode)}
+                        >
+                          <Text style={[styles.mediaModeChipText, selected ? styles.mediaModeChipTextSelected : undefined]}>
+                            {mode === "video" ? "Video" : "Photo"}
+                          </Text>
+                        </TactilePressable>
+                      );
+                    })}
+                  </GlassSurface>
+                ) : (
+                  <View />
+                )}
+                {__DEV__ ? (
+                  <GlassSurface style={styles.devBadge} intensity={34}>
+                    <Text style={styles.devBadgeText}>DEV</Text>
+                  </GlassSurface>
+                ) : null}
+              </View>
             </View>
             <Animated.View
               style={[
@@ -359,33 +546,54 @@ const styles = StyleSheet.create({
     flex: 1
   },
   topBar: {
-    alignItems: "flex-end",
     paddingHorizontal: 16,
-    paddingTop: 8
+    paddingTop: 8,
+    paddingBottom: 2
   },
-  envPill: {
-    alignSelf: "flex-end",
+  topBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  mediaModeSwitch: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    padding: 4
+  },
+  mediaModeChip: {
     borderRadius: 999,
     paddingHorizontal: 12,
-    paddingVertical: 6
+    minHeight: 28,
+    alignItems: "center",
+    justifyContent: "center"
   },
-  envText: {
+  mediaModeChipSelected: {
+    backgroundColor: "rgba(255,255,255,0.74)"
+  },
+  mediaModeChipText: {
     fontSize: 12,
     color: theme.colors.textSecondary,
+    fontWeight: "700"
+  },
+  mediaModeChipTextSelected: {
+    color: theme.colors.textPrimary
+  },
+  devBadge: {
+    alignSelf: "flex-end",
+    borderRadius: 999,
+    minWidth: 40,
+    height: 28,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  devBadgeText: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
     fontWeight: "800",
-    letterSpacing: 0.7
-  },
-  envSubText: {
-    marginTop: 2,
-    fontSize: 10,
-    color: theme.colors.tabText,
-    fontWeight: "600"
-  },
-  envHintText: {
-    marginTop: 1,
-    fontSize: 9,
-    color: theme.colors.tabText,
-    opacity: 0.82
+    letterSpacing: 0.6
   },
   content: {
     flex: 1
@@ -402,29 +610,29 @@ const styles = StyleSheet.create({
   },
   orbA: {
     position: "absolute",
-    top: -80,
-    left: -34,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: "rgba(77,155,255,0.1)"
+    top: -72,
+    left: -30,
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    backgroundColor: "rgba(77,155,255,0.03)"
   },
   orbB: {
     position: "absolute",
-    top: 210,
-    right: -58,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: "rgba(142,197,255,0.11)"
+    top: 228,
+    right: -52,
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: "rgba(142,197,255,0.032)"
   },
   orbC: {
     position: "absolute",
-    bottom: 54,
-    left: -78,
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: "rgba(224,244,255,0.2)"
+    bottom: 62,
+    left: -68,
+    width: 142,
+    height: 142,
+    borderRadius: 71,
+    backgroundColor: "rgba(224,244,255,0.045)"
   }
 });

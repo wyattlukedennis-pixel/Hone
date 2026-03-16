@@ -2,6 +2,9 @@ import type { Clip } from "../types/clip";
 
 type ComparisonPreset = "day1" | "week" | "month";
 
+export const milestoneLengthOptions = [7, 14, 30, 100] as const;
+export type MilestoneLengthOption = (typeof milestoneLengthOptions)[number];
+
 export type MilestoneDefinition = {
   day: number;
   title: string;
@@ -19,6 +22,27 @@ export type ComparisonPair = {
   thenLabel: string;
   nowLabel: string;
   title: string;
+};
+
+export type MilestoneChapterConfig = {
+  milestoneLengthDays: number;
+  milestoneStartDay: number;
+  milestoneChapter: number;
+};
+
+export type ChapterCaptureRule = {
+  captureMode: "video" | "photo";
+};
+
+export type MilestoneChapterProgress = {
+  milestoneLengthDays: number;
+  milestoneStartDay: number;
+  milestoneChapter: number;
+  progressDays: number;
+  remainingDays: number;
+  endDayTarget: number;
+  completedRatio: number;
+  reachedReveal: boolean;
 };
 
 export type PracticeHeatmapCell = {
@@ -92,6 +116,36 @@ export function uniquePracticeDays(clips: Clip[]) {
   return days;
 }
 
+function qualifiedDaySetFromRule(clips: Clip[], rule: ChapterCaptureRule) {
+  const qualified = new Set<string>();
+  for (const clip of clips) {
+    if (clip.captureType === rule.captureMode) {
+      qualified.add(clip.recordedOn.slice(0, 10));
+    }
+  }
+  return qualified;
+}
+
+export function getChapterDayCount(clips: Clip[], rule: ChapterCaptureRule) {
+  return qualifiedDaySetFromRule(clips, rule).size;
+}
+
+export function hasChapterClipToday(clips: Clip[], rule: ChapterCaptureRule, now = new Date()) {
+  const today = dayKeyFromDate(now);
+  return qualifiedDaySetFromRule(clips, rule).has(today);
+}
+
+export function getChapterStreak(clips: Clip[], rule: ChapterCaptureRule, now = new Date()) {
+  const days = qualifiedDaySetFromRule(clips, rule);
+  let streak = 0;
+  const cursor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  while (days.has(dayKeyFromDate(cursor))) {
+    streak += 1;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return streak;
+}
+
 export function getDayCount(clips: Clip[]) {
   return uniquePracticeDays(clips).size;
 }
@@ -152,6 +206,45 @@ function formatDayLabel(clipsAscending: Clip[], clip: Clip) {
     day: "numeric"
   });
   return `Day ${dayNumber} • ${formatted}`;
+}
+
+export function getMilestoneChapterProgress(dayCount: number, config: MilestoneChapterConfig): MilestoneChapterProgress {
+  const milestoneLengthDays = milestoneLengthOptions.includes(config.milestoneLengthDays as MilestoneLengthOption)
+    ? config.milestoneLengthDays
+    : 7;
+  const milestoneStartDay = Math.max(1, config.milestoneStartDay || 1);
+  const milestoneChapter = Math.max(1, config.milestoneChapter || 1);
+  const progressDays = Math.max(0, dayCount - milestoneStartDay + 1);
+  const remainingDays = Math.max(0, milestoneLengthDays - progressDays);
+  const endDayTarget = milestoneStartDay + milestoneLengthDays - 1;
+  const completedRatio = milestoneLengthDays <= 0 ? 0 : Math.min(1, progressDays / milestoneLengthDays);
+  return {
+    milestoneLengthDays,
+    milestoneStartDay,
+    milestoneChapter,
+    progressDays,
+    remainingDays,
+    endDayTarget,
+    completedRatio,
+    reachedReveal: progressDays >= milestoneLengthDays
+  };
+}
+
+export function buildChapterComparisonPair(clips: Clip[], config: MilestoneChapterConfig): ComparisonPair | null {
+  if (clips.length < 2) return null;
+  const clipsAscending = sortClipsAscending(clips);
+  const startIndex = Math.max(0, Math.min(clipsAscending.length - 1, (config.milestoneStartDay || 1) - 1));
+  const thenClip = clipsAscending[startIndex];
+  const nowClip = clipsAscending[clipsAscending.length - 1];
+  if (!thenClip || !nowClip || thenClip.id === nowClip.id) return null;
+
+  return {
+    thenClip,
+    nowClip,
+    thenLabel: formatDayLabel(clipsAscending, thenClip),
+    nowLabel: formatDayLabel(clipsAscending, nowClip),
+    title: `Chapter ${Math.max(1, config.milestoneChapter || 1)} Reveal`
+  };
 }
 
 export function buildComparisonPair(clips: Clip[], preset: ComparisonPreset): ComparisonPair | null {

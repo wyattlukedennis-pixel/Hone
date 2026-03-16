@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text } from "react-native";
 
 import { GlassSurface } from "../../components/GlassSurface";
 import { theme } from "../../theme";
+import { triggerSelectionHaptic } from "../../utils/feedback";
 
 type NoJourneyCardProps = {
   onStartJourney: () => void;
@@ -12,7 +13,13 @@ export function NoJourneyCard({ onStartJourney }: NoJourneyCardProps) {
     <GlassSurface style={styles.emptyCard}>
       <Text style={styles.emptyTitle}>No journey yet</Text>
       <Text style={styles.emptyText}>Create your first journey, then record today to unlock comparisons.</Text>
-      <Pressable style={({ pressed }) => [styles.ctaButton, pressed ? styles.pressScale : undefined]} onPress={onStartJourney}>
+      <Pressable
+        style={({ pressed }) => [styles.ctaButton, pressed ? styles.pressScale : undefined]}
+        onPress={() => {
+          triggerSelectionHaptic();
+          onStartJourney();
+        }}
+      >
         <Text style={styles.ctaText}>Start a Journey</Text>
       </Pressable>
     </GlassSurface>
