@@ -14,7 +14,7 @@ import type { Clip } from "../types/clip";
 import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
 import { formatDailyMomentTime, getDailyMomentKey, isInDailyMomentWindow } from "../utils/dailyMoment";
-import { buildChapterComparisonPlan, type ChapterTrailerMoment } from "../utils/progress";
+import { type ChapterTrailerMoment } from "../utils/progress";
 import { exportAndShareReel } from "../utils/reelExport";
 import { triggerSelectionHaptic } from "../utils/feedback";
 import { useReducedMotion } from "../utils/useReducedMotion";
@@ -288,43 +288,6 @@ export function JourneysScreen({
       trailerMoments: buildWeeklyTrailerMoments(weeklyClips)
     };
   }, [activeJourney?.id, activeJourney?.captureMode, activeJourneyClips, now]);
-  const compareReady = useMemo(() => {
-    if (!activeJourney) return false;
-    const plan = buildChapterComparisonPlan(
-      activeJourneyClips.filter((clip) => clip.captureType === activeJourney.captureMode),
-      {
-        milestoneLengthDays: activeJourney.milestoneLengthDays,
-        milestoneStartDay: activeJourney.milestoneStartDay,
-        milestoneChapter: activeJourney.milestoneChapter
-      }
-    );
-    return Boolean(plan?.comparison);
-  }, [
-    activeJourney?.id,
-    activeJourney?.captureMode,
-    activeJourney?.milestoneLengthDays,
-    activeJourney?.milestoneStartDay,
-    activeJourney?.milestoneChapter,
-    activeJourneyClips
-  ]);
-  const evolutionMoments = useMemo(() => {
-    if (!activeJourney) return [];
-    const clips = [...activeJourneyClips]
-      .filter((clip) => clip.captureType === activeJourney.captureMode)
-      .sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
-    if (!clips.length) return [];
-    const indices = clips.length === 2 ? [0, 1] : selectTrailerIndices(clips.length);
-    const labelsByCount: Record<number, string[]> = {
-      1: ["start"],
-      2: ["then", "now"],
-      3: ["then", "mid", "now"]
-    };
-    const labels = labelsByCount[indices.length] ?? labelsByCount[3];
-    return indices.map((index, labelIndex) => ({
-      clip: clips[index],
-      label: labels[labelIndex] ?? `take ${labelIndex + 1}`
-    }));
-  }, [activeJourney?.id, activeJourney?.captureMode, activeJourneyClips]);
   const [weeklyProofSharing, setWeeklyProofSharing] = useState(false);
   const [weeklyProofMessage, setWeeklyProofMessage] = useState<string | null>(null);
   const [weeklyProofDismissed, setWeeklyProofDismissed] = useState(false);
@@ -831,46 +794,6 @@ export function JourneysScreen({
                 {weeklyProofMessage ? <Text style={styles.weeklyProofMessage}>{weeklyProofMessage}</Text> : null}
               </View>
             ) : null}
-            {false && (<View style={styles.evolutionCard}>
-              <Text style={styles.evolutionTitle}>evolution strip</Text>
-              {evolutionMoments.length >= 2 ? (
-                <>
-                  <TactilePressable
-                    style={styles.evolutionThumbRow}
-                    onPress={() => {
-                      if (!activeJourney || !compareReady) return;
-                      trackEvent("comparison_reveal_opened", {
-                        journeyId: activeJourney.id,
-                        source: "journeys_evolution_strip"
-                      });
-                      onOpenProgress(activeJourney.id, { openReveal: true });
-                    }}
-                    disabled={!compareReady}
-                  >
-                    {evolutionMoments.map((moment) => {
-                      const previewUri = moment.clip.thumbnailUrl ?? (moment.clip.captureType === "photo" ? moment.clip.videoUrl : null);
-                      return (
-                        <View key={`${moment.clip.id}-${moment.label}`} style={styles.evolutionThumbShell}>
-                          {previewUri ? (
-                            <Image source={{ uri: previewUri }} style={styles.evolutionThumbImage} resizeMode="cover" />
-                          ) : (
-                            <View style={styles.evolutionThumbFallback}>
-                              <Text style={styles.evolutionThumbFallbackText}>take</Text>
-                            </View>
-                          )}
-                          <View style={styles.evolutionThumbLabelWrap}>
-                            <Text style={styles.evolutionThumbLabelText}>{moment.label}</Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </TactilePressable>
-                  <Text style={styles.evolutionCopy}>tap strip to open compare.</Text>
-                </>
-              ) : (
-                <Text style={styles.evolutionCopy}>add one more take to unlock compare.</Text>
-              )}
-            </View>)}
             {chapterRevealReady ? (
               <View style={styles.protocolCard}>
                 <Text style={styles.protocolStatus}>chapter done. reveal's ready.</Text>
@@ -1046,7 +969,7 @@ export function JourneysScreen({
         onSave={async (payload) => {
           const result = await handleSaveRecordedClip(payload);
           if (result.success) {
-            console.log("[JourneysScreen] Clip saved, bumping recordingsRevision");
+            if (__DEV__) console.log("[JourneysScreen] Clip saved, bumping recordingsRevision");
             onRecordingsRevisionBump?.();
           }
           return result;

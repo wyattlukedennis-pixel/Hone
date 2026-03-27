@@ -74,7 +74,7 @@ export async function initPurchases(): Promise<void> {
         // Non-fatal — we'll fetch again at purchase time
       }
     } catch (error) {
-      console.error("[purchases] RevenueCat init failed:", error);
+      if (__DEV__) console.error("[purchases] RevenueCat init failed:", error);
       // Fall back to storage check
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       _purchased = stored === "true";
@@ -95,7 +95,7 @@ export async function identifyUser(userId: string): Promise<void> {
     const { customerInfo } = await Purchases.logIn(userId);
     _purchased = checkEntitlement(customerInfo);
   } catch (error) {
-    console.error("[purchases] identify failed:", error);
+    if (__DEV__) console.error("[purchases] identify failed:", error);
   }
 }
 
@@ -117,7 +117,7 @@ export async function purchaseRevealExport(): Promise<boolean> {
       }
 
       if (!_package) {
-        console.error("[purchases] No package available");
+        if (__DEV__) console.error("[purchases] No package available");
         return false;
       }
 
@@ -154,7 +154,7 @@ export async function restorePurchases(): Promise<boolean> {
       }
       return _purchased;
     } catch (error) {
-      console.error("[purchases] restore failed:", error);
+      if (__DEV__) console.error("[purchases] restore failed:", error);
       return false;
     }
   }

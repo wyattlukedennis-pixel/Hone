@@ -85,7 +85,7 @@ export function ProofReceiptModal({
       setShared(true);
       triggerMilestoneHaptic();
     } catch (error) {
-      console.error("[ProofReceipt] Share failed:", error);
+      if (__DEV__) console.error("[ProofReceipt] Share failed:", error);
     }
   }
 

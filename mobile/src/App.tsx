@@ -10,7 +10,6 @@ import { clearJourneyClips } from "./api/clips";
 import { listJourneys } from "./api/journeys";
 import { GlassSurface } from "./components/GlassSurface";
 import { TabBar } from "./components/TabBar";
-import { TactilePressable } from "./components/TactilePressable";
 import { env } from "./env";
 import { identifyUser, initPurchases } from "./utils/purchases";
 import {
@@ -95,7 +94,7 @@ export default function App() {
   const [openRevealSignal, setOpenRevealSignal] = useState(0);
   const [progressEntrySignal, setProgressEntrySignal] = useState(0);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
-  const [mediaMode, setMediaMode] = useState<"video" | "photo">("video");
+  const mediaMode = "video" as const;
   const previousTabRef = useRef<TabKey>("journeys");
   const reducedMotion = useReducedMotion();
   const screenOpacity = useRef(new Animated.Value(1)).current;
@@ -542,43 +541,6 @@ export default function App() {
           <SafeAreaView style={styles.safeArea}>
             <View style={styles.topBar}>
               <View style={styles.topBarRow}>
-                {false && (session ? (
-                  <GlassSurface style={styles.mediaModeSwitch} intensity={12}>
-                    {(["video", "photo"] as const).map((mode) => {
-                      const selected = mediaMode === mode;
-                      return (
-                        <TactilePressable
-                          key={mode}
-                          style={[styles.mediaModeChip, selected ? styles.mediaModeChipSelected : undefined]}
-                          onPress={() => setMediaMode(mode)}
-                        >
-                          {selected ? (
-                            <LinearGradient
-                              pointerEvents="none"
-                              colors={theme.gradients.topControlActive}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 1, y: 1 }}
-                              style={styles.mediaModeChipActiveFill}
-                            />
-                          ) : (
-                            <LinearGradient
-                              pointerEvents="none"
-                              colors={theme.gradients.topControlGhost}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 1, y: 1 }}
-                              style={styles.mediaModeChipGhostFill}
-                            />
-                          )}
-                          <Text style={[styles.mediaModeChipText, selected ? styles.mediaModeChipTextSelected : undefined]}>
-                            {mode === "video" ? "video" : "photo"}
-                          </Text>
-                        </TactilePressable>
-                      );
-                    })}
-                  </GlassSurface>
-                ) : (
-                  <View />
-                ))}
                 {__DEV__ ? (
                   <GlassSurface style={styles.devBadge} intensity={10}>
                     <LinearGradient

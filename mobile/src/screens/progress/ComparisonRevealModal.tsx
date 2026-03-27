@@ -1351,7 +1351,7 @@ export function ComparisonRevealModal({
                           setReelPreviewVisible(true);
                           setComposing(false);
                         } catch (err) {
-                          console.error("[ComparisonReveal] Reel resolve error:", err);
+                          if (__DEV__) console.error("[ComparisonReveal] Reel resolve error:", err);
                           setReelExportMessage("something went wrong. try again.");
                           setComposing(false);
                         }

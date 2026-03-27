@@ -122,7 +122,7 @@ function buildFilterGraph(clips: ValidatedClip[]): string {
  */
 export async function composeReel(clips: ReelClip[]): Promise<string | null> {
   if (clips.length < 2) {
-    console.error("[reelComposer] Need at least 2 clips to compose a reel");
+    if (__DEV__) console.error("[reelComposer] Need at least 2 clips to compose a reel");
     return null;
   }
 
@@ -134,11 +134,11 @@ export async function composeReel(clips: ReelClip[]): Promise<string | null> {
       try {
         const info = await FileSystem.getInfoAsync(uri);
         if (!info.exists) {
-          console.warn(`[reelComposer] Clip file missing, skipping: ${uri}`);
+          if (__DEV__) console.warn(`[reelComposer] Clip file missing, skipping: ${uri}`);
           continue;
         }
       } catch {
-        console.warn(`[reelComposer] Cannot stat clip file, skipping: ${uri}`);
+        if (__DEV__) console.warn(`[reelComposer] Cannot stat clip file, skipping: ${uri}`);
         continue;
       }
     }
@@ -146,7 +146,7 @@ export async function composeReel(clips: ReelClip[]): Promise<string | null> {
   }
 
   if (validated.length < 2) {
-    console.error("[reelComposer] Fewer than 2 valid clips after filtering");
+    if (__DEV__) console.error("[reelComposer] Fewer than 2 valid clips after filtering");
     return null;
   }
 
@@ -181,12 +181,10 @@ export async function composeReel(clips: ReelClip[]): Promise<string | null> {
     }
 
     const output = await session.getOutput();
-    console.error(
-      `[reelComposer] FFmpeg failed with code ${returnCode}:\n${output}`
-    );
+    if (__DEV__) console.error(`[reelComposer] FFmpeg failed with code ${returnCode}:\n${output}`);
     return null;
   } catch (error) {
-    console.error("[reelComposer] FFmpeg execution error:", error);
+    if (__DEV__) console.error("[reelComposer] FFmpeg execution error:", error);
     return null;
   }
 }

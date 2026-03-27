@@ -60,7 +60,7 @@ export function OnboardingFlow({ onComplete, onSkipToLogin }: OnboardingFlowProp
   const [customSkillName, setCustomSkillName] = useState<string | null>(null);
   const [goalText, setGoalText] = useState<string | null>(null);
   const [captureType, setCaptureType] = useState<"video" | "photo">("video");
-  const [_clipData, setClipData] = useState<ClipData | null>(null);
+  const [, setClipData] = useState<ClipData | null>(null);
   const [signupLoading, setSignupLoading] = useState(false);
   const [signupError, setSignupError] = useState<string | null>(null);
   const [authSession, setAuthSession] = useState<{ token: string; user: User; journeyId: string } | null>(null);

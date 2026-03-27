@@ -114,7 +114,7 @@ export function useProgressState({
         return;
       }
 
-      console.log("[useProgressState] Re-fetching clips, recordingsRevision:", recordingsRevision);
+      if (__DEV__) console.log("[useProgressState] Re-fetching clips, recordingsRevision:", recordingsRevision);
       setClipsLoading(true);
       setErrorMessage(null);
       try {

@@ -114,15 +114,15 @@ export default function ChapterRevealScreen({
       if (elapsed < MIN_LOADING_MS) {
         await new Promise((r) => setTimeout(r, MIN_LOADING_MS - elapsed));
       }
-      console.log("[ChapterReveal] resolveReelUri result:", uri);
+      if (__DEV__) console.log("[ChapterReveal] resolveReelUri result:", uri);
       if (uri) {
         setVideoUri(uri);
         setPhase("playing");
       } else {
-        console.warn("[ChapterReveal] No URI returned — check backend");
+        if (__DEV__) console.warn("[ChapterReveal] No URI returned — check backend");
       }
     } catch (error) {
-      console.error("[ChapterReveal] Resolve failed:", error);
+      if (__DEV__) console.error("[ChapterReveal] Resolve failed:", error);
     }
   }
 
@@ -193,7 +193,7 @@ export default function ChapterRevealScreen({
         dialogTitle: "share your progress reel",
       });
     } catch (error) {
-      console.error("[ChapterReveal] Share failed:", error);
+      if (__DEV__) console.error("[ChapterReveal] Share failed:", error);
     }
   }
 

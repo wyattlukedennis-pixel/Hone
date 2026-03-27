@@ -491,7 +491,7 @@ export function usePracticeState({
     const journeyRule = journeyForSavedClip ? { captureMode: journeyForSavedClip.captureMode } : null;
     const dayCount = journeyRule ? getChapterDayCount(refreshed, journeyRule) : getDayCount(refreshed);
     const streak = journeyRule ? getChapterStreak(refreshed, journeyRule, effectiveNow) : 0;
-    console.log("[ClipSaved] journeyId:", journeyId, "clipCount:", refreshed.length, "dayCount:", dayCount, "streak:", streak, "captureMode:", journeyRule?.captureMode, "clipTypes:", refreshed.map(c => c.captureType).join(","));
+    if (__DEV__) console.log("[ClipSaved] journeyId:", journeyId, "clipCount:", refreshed.length, "dayCount:", dayCount, "streak:", streak, "captureMode:", journeyRule?.captureMode, "clipTypes:", refreshed.map(c => c.captureType).join(","));
     const unlockedMilestone = getUnlockedMilestone(dayCount);
     const newestClip = refreshed[0] ?? null;
     const celebrationPayload = buildSaveCelebration(dayCount, streak, unlockedMilestone?.title ?? null);
@@ -609,7 +609,7 @@ export function usePracticeState({
       const message = toJourneyErrorMessage(error);
       setErrorMessage(message);
       setRecorderStatusMessage(null);
-      console.error("clip save failed", error);
+      if (__DEV__) console.error("clip save failed", error);
       return { success: false, errorMessage: message };
     } finally {
       setClipSaving(false);

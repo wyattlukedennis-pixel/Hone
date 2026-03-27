@@ -43,22 +43,17 @@ export function SettingsScreen({
   loggingOut,
   dailyMomentSettings,
   onDailyMomentSettingsChange,
-  hapticsMode,
-  onHapticsModeChange,
   devDateShiftSettings,
   onDevDateShiftSettingsChange,
   onClearAllRecordings,
-  onGetPendingUploadsCount,
-  onRetryPendingUploads
+  onGetPendingUploadsCount
 }: SettingsScreenProps) {
   const insets = useSafeAreaInsets();
   const isDevToolsVisible = __DEV__ && devDateShiftSettings;
   const [clearingRecordings, setClearingRecordings] = useState(false);
   const [devMessage, setDevMessage] = useState<{ text: string; success: boolean } | null>(null);
-  const [pendingUploadsCount, setPendingUploadsCount] = useState(0);
-  const [pendingUploadsLoading, setPendingUploadsLoading] = useState(true);
-  const [retryingUploads, setRetryingUploads] = useState(false);
-  const [uploadsMessage, setUploadsMessage] = useState<{ text: string; success: boolean } | null>(null);
+  const [, setPendingUploadsCount] = useState(0);
+  const [, setPendingUploadsLoading] = useState(true);
   const [timePickerOpen, setTimePickerOpen] = useState(false);
 
   async function resetOnboardingState() {
@@ -146,70 +141,7 @@ export function SettingsScreen({
         </View>
       </GlassSurface>
 
-      {false && (<GlassSurface style={styles.card}>
-        <Text style={styles.cardLabel}>sync queue</Text>
-        <Text style={styles.cardValue}>{pendingUploadsLoading ? "checking sync..." : `${pendingUploadsCount} waiting`}</Text>
-        <Text style={styles.cardHint}>
-          {pendingUploadsCount > 0
-            ? "some takes still syncing. tap retry."
-            : "all synced"}
-        </Text>
-        <View style={styles.uploadActions}>
-          <TactilePressable
-            style={[styles.uploadActionButton, retryingUploads ? styles.uploadActionButtonDisabled : undefined]}
-            onPress={async () => {
-              setRetryingUploads(true);
-              setUploadsMessage(null);
-              const result = await onRetryPendingUploads();
-              setPendingUploadsCount(result.remaining);
-              setUploadsMessage({ text: result.message, success: result.success });
-              setRetryingUploads(false);
-            }}
-            disabled={retryingUploads}
-          >
-            <Text style={styles.uploadActionButtonText}>{retryingUploads ? "retrying..." : "retry sync"}</Text>
-          </TactilePressable>
-          <TactilePressable
-            style={styles.uploadRefreshButton}
-            onPress={async () => {
-              setPendingUploadsLoading(true);
-              const count = await onGetPendingUploadsCount();
-              setPendingUploadsCount(count);
-              setPendingUploadsLoading(false);
-            }}
-          >
-            <Text style={styles.uploadRefreshButtonText}>refresh count</Text>
-          </TactilePressable>
-        </View>
-        {uploadsMessage ? (
-          <Text style={[styles.uploadMessage, uploadsMessage!.success ? styles.uploadMessageSuccess : styles.uploadMessageDanger]}>
-            {uploadsMessage!.text}
-          </Text>
-        ) : null}
-      </GlassSurface>)}
 
-      {false && (<GlassSurface style={styles.card}>
-        <Text style={styles.cardLabel}>haptics</Text>
-        <Text style={styles.cardValue}>tap response strength</Text>
-        <Text style={styles.cardHint}>how strong taps feel</Text>
-        <View style={styles.hapticsRow}>
-          {[
-            { key: "off" as const, label: "off" },
-            { key: "subtle" as const, label: "subtle" },
-            { key: "standard" as const, label: "standard" }
-          ].map((entry) => (
-            <TactilePressable
-              key={entry.key}
-              style={[styles.hapticsChip, hapticsMode === entry.key ? styles.hapticsChipActive : undefined]}
-              onPress={() => onHapticsModeChange(entry.key)}
-            >
-              <Text style={[styles.hapticsChipText, hapticsMode === entry.key ? styles.hapticsChipTextActive : undefined]}>
-                {entry.label}
-              </Text>
-            </TactilePressable>
-          ))}
-        </View>
-      </GlassSurface>)}
 
       {isDevToolsVisible ? (
         <GlassSurface style={styles.card}>

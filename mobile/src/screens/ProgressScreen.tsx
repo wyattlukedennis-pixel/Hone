@@ -15,7 +15,7 @@ import { theme } from "../theme";
 import type { JourneyReveal } from "../types/journey";
 import { triggerMilestoneHaptic, triggerSelectionHaptic } from "../utils/feedback";
 import { hasRevealExportPurchase } from "../utils/purchases";
-import { exportAndSaveReel, exportAndShareReel, prepareReelAsset } from "../utils/reelExport";
+import { prepareReelAsset } from "../utils/reelExport";
 import { buildRevealComparisonPlanFromRange, buildRevealStoryline } from "../utils/progress";
 import { useReducedMotion } from "../utils/useReducedMotion";
 import ChapterRevealScreen from "./progress/ChapterRevealScreen";
@@ -83,16 +83,16 @@ export function ProgressScreen({
   const [pendingPaywallReveal, setPendingPaywallReveal] = useState<{ reveal: JourneyReveal; source: "history_row" | "history_picker" } | null>(null);
   const [replayOpenStatusMessage, setReplayOpenStatusMessage] = useState<string | null>(null);
   const [renderReplayOpenStatus, setRenderReplayOpenStatus] = useState(false);
-  const [quickReelExporting, setQuickReelExporting] = useState(false);
-  const [quickReelSaving, setQuickReelSaving] = useState(false);
+  const [, setQuickReelExporting] = useState(false);
+  const [, setQuickReelSaving] = useState(false);
   const [quickReelReady, setQuickReelReady] = useState(false);
-  const [quickReelMessage, setQuickReelMessage] = useState<string | null>(null);
+  const [, setQuickReelMessage] = useState<string | null>(null);
   const [quickReelUpdatedAt, setQuickReelUpdatedAt] = useState<number | null>(null);
-  const [quickReelRelativeTick, setQuickReelRelativeTick] = useState(0);
-  const [journeyFinaleExporting, setJourneyFinaleExporting] = useState(false);
-  const [journeyFinaleSaving, setJourneyFinaleSaving] = useState(false);
-  const [journeyFinaleMessage, setJourneyFinaleMessage] = useState<string | null>(null);
-  const [journeyFinaleUnlockNotice, setJourneyFinaleUnlockNotice] = useState(false);
+  const [, setQuickReelRelativeTick] = useState(0);
+  const [, setJourneyFinaleExporting] = useState(false);
+  const [, setJourneyFinaleSaving] = useState(false);
+  const [, setJourneyFinaleMessage] = useState<string | null>(null);
+  const [, setJourneyFinaleUnlockNotice] = useState(false);
   const [journeyFinaleUnlockSeen, setJourneyFinaleUnlockSeen] = useState(false);
   const [journeyFinaleUnlockSeenLoaded, setJourneyFinaleUnlockSeenLoaded] = useState(false);
   const handledRevealSignalRef = useRef(0);
@@ -455,8 +455,6 @@ export function ProgressScreen({
   const chapterProgressLabel = `${Math.min(chapterProgressDays, chapterTargetDays)} / ${chapterTargetDays} takes`;
   const chapterCountdownLabel = `${chapterRemainingDays} ${chapterRemainingDays === 1 ? "take" : "takes"} to reveal`;
   const trailerMomentCount = comparisonPlan?.trailerMoments.length ?? 0;
-  const journeyFinaleRemainingDays = Math.max(0, JOURNEY_FINALE_TARGET_DAYS - dayCount);
-  const journeyFinaleProgressRatio = Math.max(0, Math.min(1, dayCount / JOURNEY_FINALE_TARGET_DAYS));
   const journeyFinaleSourceClips = useMemo(() => {
     if (!selectedJourney) return [];
     const clipsAscending = [...revealTrackClips].sort(
@@ -533,17 +531,6 @@ export function ProgressScreen({
       !chapterActionMessage &&
       !compactMode
   );
-  const quickReelUpdatedLabel = useMemo(() => {
-    if (!quickReelUpdatedAt) return null;
-    const elapsedMs = Math.max(0, Date.now() - quickReelUpdatedAt);
-    if (elapsedMs < 45 * 1000) return "updated just now";
-    const elapsedMinutes = Math.floor(elapsedMs / (60 * 1000));
-    if (elapsedMinutes < 60) return `updated ${elapsedMinutes}m ago`;
-    const elapsedHours = Math.floor(elapsedMinutes / 60);
-    if (elapsedHours < 24) return `updated ${elapsedHours}h ago`;
-    const elapsedDays = Math.floor(elapsedHours / 24);
-    return `updated ${elapsedDays}d ago`;
-  }, [quickReelUpdatedAt, quickReelRelativeTick]);
 
   useEffect(() => {
     if (!selectedJourney) return;
@@ -741,130 +728,6 @@ export function ProgressScreen({
     });
   }
 
-  async function runQuickReelAction(action: "share" | "save") {
-    if (!selectedJourney || !quickReelExportInput || quickReelExporting || quickReelSaving) return;
-    setQuickReelMessage(null);
-    if (action === "share") {
-      setQuickReelExporting(true);
-    } else {
-      setQuickReelSaving(true);
-    }
-    trackEvent("progress_quick_reel_action_tapped", {
-      journeyId: selectedJourney.id,
-      chapterNumber,
-      milestoneLengthDays: chapterTargetDays,
-      progressDays: chapterProgressDays,
-      action
-    });
-
-    try {
-      const result = action === "share" ? await exportAndShareReel(quickReelExportInput) : await exportAndSaveReel(quickReelExportInput);
-      const statusUpdatedAt = Date.now();
-      setQuickReelMessage(result.message);
-      const nextReady =
-        result.success
-          ? true
-          : result.code === "no_clip" || result.code === "prepare_failed"
-            ? false
-            : quickReelReady;
-      setQuickReelReady(nextReady);
-      setQuickReelUpdatedAt(statusUpdatedAt);
-      await writeQuickReelStatus({
-        journeyId: selectedJourney.id,
-        chapterNumber,
-        message: result.message,
-        source: action,
-        success: result.success,
-        ready: nextReady
-      });
-      trackEvent("progress_quick_reel_action_completed", {
-        journeyId: selectedJourney.id,
-        chapterNumber,
-        action,
-        success: result.success,
-        code: result.code,
-        sourceKind: result.sourceKind,
-        cacheHit: result.cacheHit
-      });
-    } catch {
-      const statusUpdatedAt = Date.now();
-      const fallbackMessage = action === "share" ? "could not share right now." : "could not save right now.";
-      setQuickReelMessage(fallbackMessage);
-      setQuickReelUpdatedAt(statusUpdatedAt);
-      await writeQuickReelStatus({
-        journeyId: selectedJourney.id,
-        chapterNumber,
-        message: fallbackMessage,
-        source: action,
-        success: false,
-        ready: quickReelReady
-      });
-      trackEvent("progress_quick_reel_action_completed", {
-        journeyId: selectedJourney.id,
-        chapterNumber,
-        action,
-        success: false,
-        code: "unexpected_error",
-        sourceKind: "none",
-        cacheHit: null
-      });
-    } finally {
-      if (action === "share") {
-        setQuickReelExporting(false);
-      } else {
-        setQuickReelSaving(false);
-      }
-    }
-  }
-
-  async function runJourneyFinaleAction(action: "share" | "save") {
-    if (!selectedJourney || !journeyFinaleExportInput || !journeyFinaleUnlocked || journeyFinaleExporting || journeyFinaleSaving) return;
-    setJourneyFinaleMessage(null);
-    if (action === "share") {
-      setJourneyFinaleExporting(true);
-    } else {
-      setJourneyFinaleSaving(true);
-    }
-    trackEvent("journey_finale_action_tapped", {
-      journeyId: selectedJourney.id,
-      targetDays: JOURNEY_FINALE_TARGET_DAYS,
-      progressDays: dayCount,
-      action
-    });
-    try {
-      const result = action === "share" ? await exportAndShareReel(journeyFinaleExportInput) : await exportAndSaveReel(journeyFinaleExportInput);
-      setJourneyFinaleMessage(result.message);
-      trackEvent("journey_finale_action_completed", {
-        journeyId: selectedJourney.id,
-        targetDays: JOURNEY_FINALE_TARGET_DAYS,
-        progressDays: dayCount,
-        action,
-        success: result.success,
-        code: result.code,
-        sourceKind: result.sourceKind,
-        cacheHit: result.cacheHit
-      });
-    } catch {
-      const fallbackMessage = action === "share" ? "could not share finale right now." : "could not save finale right now.";
-      setJourneyFinaleMessage(fallbackMessage);
-      trackEvent("journey_finale_action_completed", {
-        journeyId: selectedJourney.id,
-        targetDays: JOURNEY_FINALE_TARGET_DAYS,
-        progressDays: dayCount,
-        action,
-        success: false,
-        code: "unexpected_error",
-        sourceKind: "none",
-        cacheHit: null
-      });
-    } finally {
-      if (action === "share") {
-        setJourneyFinaleExporting(false);
-      } else {
-        setJourneyFinaleSaving(false);
-      }
-    }
-  }
 
   useEffect(() => {
     if (!openRevealSignal) return;
@@ -1116,17 +979,6 @@ export function ProgressScreen({
                           : "compare anytime while this chapter is still in build."
                         : "log one focused take and keep momentum."}
                     </Text>
-                    {false && revealReady && comparisonPlan ? (
-                      <View style={styles.revealIntelCard}>
-                        <Text style={styles.revealIntelLabel}>
-                          smart pair: {comparisonPlan!.strategyLabel} ({comparisonPlan!.consistencyScore}% consistency)
-                        </Text>
-                        <Text style={styles.revealIntelReason}>{comparisonPlan!.reason}</Text>
-                        <Text style={styles.revealIntelTrailer}>
-                          auto trailer ready: {trailerMomentCount} {trailerMomentCount === 1 ? "moment" : "moments"} sequenced.
-                        </Text>
-                      </View>
-                    ) : null}
 
                     {!revealReady ? (
                       <View style={styles.revealCapsuleTrack}>
@@ -1193,38 +1045,6 @@ export function ProgressScreen({
                         </Text>
                       </TactilePressable>
                     )}
-                    {false && compareReady && quickReelReady ? (
-                      <View style={styles.revealQuickReadyGroup}>
-                        <View style={styles.revealQuickReadyPill}>
-                          <Text style={styles.revealQuickReadyPillText}>quick reel ready</Text>
-                        </View>
-                        {quickReelUpdatedLabel ? <Text style={styles.revealQuickReadyMeta}>{quickReelUpdatedLabel}</Text> : null}
-                      </View>
-                    ) : null}
-                    {false && compareReady ? (
-                      <View style={styles.revealCapsuleSecondaryRow}>
-                        <TactilePressable
-                          style={[styles.revealCapsuleSecondary, quickReelExporting || quickReelSaving ? styles.revealCapsuleSecondaryDisabled : undefined]}
-                          onPress={() => {
-                            void runQuickReelAction("share");
-                          }}
-                          disabled={quickReelExporting || quickReelSaving}
-                        >
-                          <Text style={styles.revealCapsuleSecondaryText}>{quickReelExporting ? "preparing..." : "share day 1 -> today"}</Text>
-                        </TactilePressable>
-                        <View style={styles.revealCapsuleSecondarySpacer} />
-                        <TactilePressable
-                          style={[styles.revealCapsuleSecondary, quickReelExporting || quickReelSaving ? styles.revealCapsuleSecondaryDisabled : undefined]}
-                          onPress={() => {
-                            void runQuickReelAction("save");
-                          }}
-                          disabled={quickReelExporting || quickReelSaving}
-                        >
-                          <Text style={styles.revealCapsuleSecondaryText}>{quickReelSaving ? "saving..." : "save day 1 -> today"}</Text>
-                        </TactilePressable>
-                      </View>
-                    ) : null}
-                    {false && quickReelMessage ? <Text style={styles.revealCapsuleSecondaryMessage}>{quickReelMessage}</Text> : null}
 
                     <Animated.View
                       style={[
@@ -1246,97 +1066,6 @@ export function ProgressScreen({
                     </Animated.View>
                   </LinearGradient>
                 </Animated.View>
-                {false && (<View style={styles.protocolCard}>
-                  <Text style={styles.protocolKicker}>chapter status</Text>
-                  <Text style={styles.protocolTitle}>{`chapter ${chapterNumber} progress`}</Text>
-                  <Text style={styles.protocolCopy}>one take a day is enough. keep the chapter moving.</Text>
-                  <Text style={styles.protocolStatus}>
-                    {didPracticeToday ? "today logged." : "still need today's take."} {chapterProgressDays}/{chapterTargetDays} takes this chapter.
-                  </Text>
-                  <Text style={styles.protocolMeta}>
-                    {revealReady
-                      ? "reveal is unlocked."
-                      : chapterRemainingDays <= 1
-                        ? "one more take unlocks your reveal."
-                        : `${chapterRemainingDays} takes left before reveal.`}
-                  </Text>
-                </View>)}
-                {false && (<Animated.View
-                  style={[
-                    styles.finaleCardMotion,
-                    {
-                      transform: [{ scale: finaleUnlockPulse }]
-                    }
-                  ]}
-                >
-                  <View style={[styles.finaleCard, journeyFinaleUnlockNotice ? styles.finaleCardUnlockedFlash : null]}>
-                  <View style={styles.finaleTopRow}>
-                    <Text style={styles.finaleKicker}>journey finale</Text>
-                    <View style={[styles.finaleStatePill, journeyFinaleUnlocked ? styles.finaleStatePillLive : styles.finaleStatePillLocked]}>
-                      <Text style={[styles.finaleStateText, journeyFinaleUnlocked ? styles.finaleStateTextLive : styles.finaleStateTextLocked]}>
-                        {journeyFinaleUnlocked ? "live" : "locked"}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.finaleTitle}>{journeyFinaleUnlocked ? "your full arc is ready." : "final reveal is building."}</Text>
-                  <Text style={styles.finaleCopy}>
-                    {journeyFinaleUnlocked
-                      ? `day 1 -> day ${dayCount}. your full-journey montage is ready to share.`
-                      : `${journeyFinaleRemainingDays} ${journeyFinaleRemainingDays === 1 ? "day" : "days"} left to unlock your day 1 -> day ${JOURNEY_FINALE_TARGET_DAYS} finale.`}
-                  </Text>
-                  {journeyFinaleUnlockNotice ? <Text style={styles.finaleUnlockNotice}>finale unlocked. share your full arc.</Text> : null}
-                  <View style={styles.finaleTrack}>
-                    <View
-                      style={[
-                        styles.finaleTrackFill,
-                        {
-                          width: `${Math.max(0, Math.min(100, Math.round(journeyFinaleProgressRatio * 100)))}%`
-                        }
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.finaleMeta}>
-                    {Math.min(dayCount, JOURNEY_FINALE_TARGET_DAYS)} / {JOURNEY_FINALE_TARGET_DAYS} days logged
-                  </Text>
-                  {journeyFinaleUnlocked ? (
-                    <View style={styles.finaleActionRow}>
-                      <TactilePressable
-                        style={[styles.finaleSecondaryAction, journeyFinaleExporting || journeyFinaleSaving ? styles.finaleActionDisabled : undefined]}
-                        onPress={() => {
-                          void runJourneyFinaleAction("share");
-                        }}
-                        disabled={journeyFinaleExporting || journeyFinaleSaving}
-                      >
-                        <Text style={styles.finaleSecondaryActionText}>{journeyFinaleExporting ? "preparing..." : "share my journey"}</Text>
-                      </TactilePressable>
-                      <View style={styles.finaleActionSpacer} />
-                      <TactilePressable
-                        style={[styles.finaleSecondaryAction, journeyFinaleExporting || journeyFinaleSaving ? styles.finaleActionDisabled : undefined]}
-                        onPress={() => {
-                          void runJourneyFinaleAction("save");
-                        }}
-                        disabled={journeyFinaleExporting || journeyFinaleSaving}
-                      >
-                        <Text style={styles.finaleSecondaryActionText}>{journeyFinaleSaving ? "saving..." : "save my journey"}</Text>
-                      </TactilePressable>
-                    </View>
-                  ) : (
-                    <TactilePressable
-                      style={styles.finalePrimaryAction}
-                      onPress={() => {
-                        trackEvent("record_tapped", { journeyId: selectedJourney!.id, context: "journey_finale_locked_cta" });
-                        onOpenJourneysTab({
-                          journeyId: selectedJourney!.id,
-                          openRecorder: true
-                        });
-                      }}
-                    >
-                      <Text style={styles.finalePrimaryActionText}>{didPracticeToday ? "retake" : "record"}</Text>
-                    </TactilePressable>
-                  )}
-                  {journeyFinaleMessage ? <Text style={styles.finaleMessage}>{journeyFinaleMessage}</Text> : null}
-                </View>
-                </Animated.View>)}
                 {chapterActionMessage ? <Text style={styles.chapterActionMessage}>{chapterActionMessage}</Text> : null}
               </Animated.View>
             ) : null}

@@ -14,7 +14,13 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hone.mobile",
-      "icon": "./src/assets/logo.png"
+      "icon": "./src/assets/logo.png",
+      "infoPlist": {
+        "NSCameraUsageDescription": "hone needs camera access to record your daily practice clips",
+        "NSMicrophoneUsageDescription": "hone needs microphone access to capture audio in your practice clips",
+        "NSPhotoLibraryUsageDescription": "hone needs photo library access to save your reveal videos",
+        "NSPhotoLibraryAddUsageDescription": "hone needs permission to save your reveal videos to your camera roll"
+      }
     },
     "android": {
       "package": "com.hone.mobile"

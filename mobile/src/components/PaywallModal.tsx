@@ -46,7 +46,7 @@ export function PaywallModal({ visible, onClose, onPurchased }: PaywallModalProp
         setState("idle");
       }
     } catch (error) {
-      console.error("[Paywall] Purchase failed:", error);
+      if (__DEV__) console.error("[Paywall] Purchase failed:", error);
       Alert.alert("purchase failed", "something went wrong. try again.");
       setState("idle");
     }
@@ -66,7 +66,7 @@ export function PaywallModal({ visible, onClose, onPurchased }: PaywallModalProp
         setState("idle");
       }
     } catch (error) {
-      console.error("[Paywall] Restore failed:", error);
+      if (__DEV__) console.error("[Paywall] Restore failed:", error);
       Alert.alert("restore failed", "something went wrong. try again.");
       setState("idle");
     }
