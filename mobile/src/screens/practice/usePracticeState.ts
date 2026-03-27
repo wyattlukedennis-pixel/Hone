@@ -351,9 +351,7 @@ export function usePracticeState({
     }
   }, [activeJourneyId, clipsByJourney, clipsLoadingByJourney]);
 
-  useEffect(() => {
-    setNewCaptureMode(mediaMode);
-  }, [mediaMode]);
+  // newCaptureMode is set by the manage modal UI, not by mediaMode
 
   useEffect(() => {
     let cancelled = false;
@@ -450,7 +448,7 @@ export function usePracticeState({
       setNewCategory("");
       setNewGoalText("");
       setNewMilestoneLengthDays(7);
-      setNewCaptureMode(mediaMode);
+      setNewCaptureMode("video");
       setNewSkillPack("fitness");
       setStatusMessage("Journey live. Day 1 camera is open.");
     } catch (error) {
