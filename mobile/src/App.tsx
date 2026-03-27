@@ -94,7 +94,7 @@ export default function App() {
   const [openRevealSignal, setOpenRevealSignal] = useState(0);
   const [progressEntrySignal, setProgressEntrySignal] = useState(0);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
-  const mediaMode = "video" as const;
+  const [mediaMode, setMediaMode] = useState<"video" | "photo">("video");
   const previousTabRef = useRef<TabKey>("journeys");
   const reducedMotion = useReducedMotion();
   const screenOpacity = useRef(new Animated.Value(1)).current;
@@ -444,12 +444,14 @@ export default function App() {
           deepLinkRecorderJourneyId={deepLinkRecorderJourneyId}
           recordingsRevision={recordingsRevision}
           onRecordingsRevisionBump={() => setRecordingsRevision((v) => v + 1)}
+          onMediaModeChange={setMediaMode}
         />
       ) : null;
   }, [
     session,
     activeJourneyId,
     mediaMode,
+    setMediaMode,
     devDateShiftSettings,
     dailyMomentSettings,
     openRecorderSignal,

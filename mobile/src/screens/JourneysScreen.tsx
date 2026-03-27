@@ -85,6 +85,7 @@ type JourneysScreenProps = {
   deepLinkRecorderJourneyId: string | null;
   recordingsRevision: number;
   onRecordingsRevisionBump?: () => void;
+  onMediaModeChange?: (mode: "video" | "photo") => void;
 };
 
 export function JourneysScreen({
@@ -101,7 +102,8 @@ export function JourneysScreen({
   deepLinkRecorderSignal,
   deepLinkRecorderJourneyId,
   recordingsRevision,
-  onRecordingsRevisionBump
+  onRecordingsRevisionBump,
+  onMediaModeChange
 }: JourneysScreenProps) {
   const reducedMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
@@ -172,6 +174,13 @@ export function JourneysScreen({
     onDevDateShiftSettingsChange,
     recordingsRevision
   });
+
+  // Sync mediaMode when active journey changes
+  useEffect(() => {
+    if (activeJourney?.captureMode && onMediaModeChange) {
+      onMediaModeChange(activeJourney.captureMode);
+    }
+  }, [activeJourney?.captureMode, onMediaModeChange]);
 
   useEffect(() => {
     const timer = setInterval(() => {

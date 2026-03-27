@@ -270,13 +270,13 @@ export function usePracticeState({
     try {
       const response = await listJourneys(token);
       setJourneys(response.journeys);
-      const modeJourneys = response.journeys.filter((journey) => journey.captureMode === mediaMode);
-      if (modeJourneys.length === 0) {
+      const allJourneys = response.journeys;
+      if (allJourneys.length === 0) {
         onActiveJourneyChange(null);
       } else {
-        const activeStillExists = Boolean(activeJourneyId) && modeJourneys.some((journey) => journey.id === activeJourneyId);
+        const activeStillExists = Boolean(activeJourneyId) && allJourneys.some((journey) => journey.id === activeJourneyId);
         if (!activeStillExists) {
-          onActiveJourneyChange(modeJourneys[0].id);
+          onActiveJourneyChange(allJourneys[0].id);
         }
       }
     } catch (error) {
@@ -467,7 +467,7 @@ export function usePracticeState({
     try {
       await archiveJourney(token, journeyId);
       const remainingJourneys = journeys.filter((journey) => journey.id !== journeyId);
-      const remainingModeJourneys = remainingJourneys.filter((journey) => journey.captureMode === mediaMode);
+      const remainingModeJourneys = remainingJourneys;
       setJourneys(remainingJourneys);
       setClipsByJourney((current) => {
         const next = { ...current };
@@ -616,7 +616,7 @@ export function usePracticeState({
     }
   }
 
-  const modeJourneys = useMemo(() => journeys.filter((journey) => journey.captureMode === mediaMode), [journeys, mediaMode]);
+  const modeJourneys = useMemo(() => journeys, [journeys]);
   const activeJourney = useMemo(
     () => (activeJourneyId ? modeJourneys.find((journey) => journey.id === activeJourneyId) ?? null : null),
     [modeJourneys, activeJourneyId]
