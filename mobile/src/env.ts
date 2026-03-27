@@ -3,6 +3,7 @@ import { NativeModules } from "react-native";
 
 const FALLBACK_API_BASE_URL = "http://localhost:4000";
 const appEnv = process.env.EXPO_PUBLIC_APP_ENV ?? "development";
+const DEFAULT_REVEAL_QUICK_SHARE_CAP_DAYS = 7;
 
 type DerivedCandidate = {
   source: string;
@@ -141,9 +142,21 @@ function dedupe(values: Array<string | null | undefined>) {
   return output;
 }
 
+function parsePositiveInteger(input: string | undefined, fallback: number) {
+  if (!input) return fallback;
+  const parsed = Number.parseInt(input.trim(), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed <= 0) return fallback;
+  return parsed;
+}
+
 const explicitApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim()
   ? stripTrailingSlash(process.env.EXPO_PUBLIC_API_BASE_URL)
   : null;
+const revealQuickShareCapDays = parsePositiveInteger(
+  process.env.EXPO_PUBLIC_REVEAL_QUICK_SHARE_CAP_DAYS,
+  DEFAULT_REVEAL_QUICK_SHARE_CAP_DAYS
+);
 const explicitHost = explicitApiBaseUrl ? hostnameFromUrl(explicitApiBaseUrl) || extractHostname(explicitApiBaseUrl) : "";
 const explicitIsLocal = Boolean(explicitHost) && isLocalHostname(explicitHost);
 
@@ -176,5 +189,6 @@ export const env = {
   appEnv,
   apiBaseUrl,
   apiBaseUrlCandidates,
-  apiBaseUrlSource
+  apiBaseUrlSource,
+  revealQuickShareCapDays
 };

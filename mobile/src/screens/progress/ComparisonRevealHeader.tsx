@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 
 import { TactilePressable } from "../../components/TactilePressable";
+import { theme } from "../../theme";
 
 type ComparisonRevealHeaderProps = {
   title: string;
@@ -41,30 +42,35 @@ const styles = StyleSheet.create({
     flex: 1
   },
   compareModalTitle: {
-    color: "#eef5ff",
+    color: theme.colors.textPrimary,
     fontSize: 20,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   compareModalSubtitle: {
     marginTop: 2,
-    color: "rgba(214,230,250,0.82)",
+    color: theme.colors.textSecondary,
     fontSize: 12,
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   compareModalClose: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    paddingHorizontal: 11,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.97)",
+    paddingHorizontal: 10,
     paddingVertical: 5
   },
   compareModalCloseDisabled: {
     opacity: 0.62
   },
   compareModalCloseText: {
-    color: "#dceaff",
-    fontWeight: "700",
-    fontSize: 13
+    color: theme.colors.textPrimary,
+    fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   }
 });

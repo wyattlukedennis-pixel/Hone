@@ -36,33 +36,42 @@ export function ComparisonPresetControl({ preset, options, onChange }: Compariso
 const styles = StyleSheet.create({
   presetControl: {
     marginTop: 14,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.62)",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)",
     flexDirection: "row",
     padding: 4,
     gap: 4
   },
   presetButton: {
     flex: 1,
-    borderRadius: 11,
+    borderRadius: theme.shape.chipRadius,
+    borderWidth: 2,
+    borderColor: "transparent",
     paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center"
   },
   presetButtonActive: {
-    backgroundColor: theme.colors.accent
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(255,90,31,0.28)"
   },
   presetText: {
     color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 13
+    fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.72,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   },
   presetTextActive: {
-    color: "#eaf4ff",
+    color: theme.colors.textPrimary,
     fontWeight: "800",
-    fontSize: 13
+    fontSize: 12,
+    letterSpacing: 0.72,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   },
   pressScale: {
     transform: [{ scale: 0.985 }],

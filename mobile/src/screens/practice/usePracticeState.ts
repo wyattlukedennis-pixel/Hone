@@ -4,12 +4,13 @@ import { Animated, Dimensions } from "react-native";
 import { trackEvent } from "../../analytics/events";
 import { listClips } from "../../api/clips";
 import { archiveJourney, createJourney, listJourneys } from "../../api/journeys";
+import { readAutoReminderSetupCompleted, writeAutoReminderSetupCompleted } from "../../storage/autoReminderSetupStorage";
 import { enqueueClipUpload, getPendingClipUploadCount, processClipUploadQueue, type ClipUploadQueueStatus } from "../../storage/clipUploadQueue";
 import { theme } from "../../theme";
 import type { Clip } from "../../types/clip";
 import type { DevDateShiftSettings } from "../../types/devTools";
 import type { Journey } from "../../types/journey";
-import { triggerMilestoneHaptic, triggerSaveHaptic } from "../../utils/feedback";
+import { triggerMilestoneHaptic, triggerSaveHaptic, playSaveSound } from "../../utils/feedback";
 import { useReducedMotion } from "../../utils/useReducedMotion";
 import {
   buildPracticeHeatmap,
@@ -44,6 +45,13 @@ type CelebrationState = {
 type CaptureMode = "video" | "photo";
 type CaptureType = "video" | "photo";
 
+function toLocalDayKey(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function applyDayOffset(value: string, dayOffset: number) {
   if (!dayOffset) return value;
   const base = new Date(value);
@@ -52,20 +60,30 @@ function applyDayOffset(value: string, dayOffset: number) {
   return base.toISOString();
 }
 
+function applyDayOffsetToDayKey(value: string, dayOffset: number) {
+  if (!dayOffset) return value;
+  const [yearRaw, monthRaw, dayRaw] = value.split("-").map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(yearRaw) || !Number.isFinite(monthRaw) || !Number.isFinite(dayRaw)) return value;
+  const base = new Date(yearRaw, monthRaw - 1, dayRaw);
+  if (Number.isNaN(base.getTime())) return value;
+  base.setDate(base.getDate() + dayOffset);
+  return toLocalDayKey(base);
+}
+
 function toUploadStatusMessage(status: ClipUploadQueueStatus) {
   switch (status) {
     case "queued":
-      return "Upload pending...";
+      return "Sync queued...";
     case "uploading":
-      return "Uploading clip...";
+      return "Syncing take...";
     case "uploaded":
-      return "Upload complete.";
+      return "Sync complete.";
     case "processing":
-      return "Finalizing chapter clip...";
+      return "Finalizing chapter...";
     case "ready":
-      return "Clip ready.";
+      return "Take ready.";
     case "failed":
-      return "Upload failed. Retrying in background...";
+      return "Sync failed. Retrying in background...";
     default:
       return null;
   }
@@ -94,6 +112,7 @@ export function usePracticeState({
   const [newGoalText, setNewGoalText] = useState("");
   const [newMilestoneLengthDays, setNewMilestoneLengthDays] = useState<number>(7);
   const [newCaptureMode, setNewCaptureMode] = useState<CaptureMode>("video");
+  const [newSkillPack, setNewSkillPack] = useState<Journey["skillPack"]>("fitness");
 
   const [clipsByJourney, setClipsByJourney] = useState<Record<string, Clip[]>>({});
   const [clipsLoadingByJourney, setClipsLoadingByJourney] = useState<Record<string, boolean>>({});
@@ -105,6 +124,9 @@ export function usePracticeState({
   const [pendingUploadCount, setPendingUploadCount] = useState(0);
   const [retryingPendingUploads, setRetryingPendingUploads] = useState(false);
   const [pendingUploadStatusMessage, setPendingUploadStatusMessage] = useState<string | null>(null);
+  const [autoReminderSuggestion, setAutoReminderSuggestion] = useState<{ hour: number; minute: number } | null>(null);
+  const autoReminderSetupLoadedRef = useRef(false);
+  const autoReminderSetupCompletedRef = useRef(false);
 
   const [celebration, setCelebration] = useState<CelebrationState | null>(null);
   const [recentlyFilledDotIndex, setRecentlyFilledDotIndex] = useState<number | null>(null);
@@ -155,6 +177,7 @@ export function usePracticeState({
 
   function playSaveMotion(filledDotIndex: number, unlockedMilestone: boolean, clipUrl: string | null) {
     triggerSaveHaptic();
+    playSaveSound();
     setRecentlyFilledDotIndex(filledDotIndex);
     dotFillProgress.setValue(reducedMotion ? 1 : 0);
     statPulse.setValue(reducedMotion ? 1 : 0.94);
@@ -297,6 +320,20 @@ export function usePracticeState({
   }, [token, mediaMode]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadAutoReminderSetupState() {
+      const completed = await readAutoReminderSetupCompleted();
+      if (cancelled) return;
+      autoReminderSetupCompletedRef.current = completed;
+      autoReminderSetupLoadedRef.current = true;
+    }
+    void loadAutoReminderSetupState();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setClipsByJourney({});
     setClipsLoadingByJourney({});
     if (activeJourneyId) {
@@ -361,18 +398,18 @@ export function usePracticeState({
       });
       setPendingUploadCount(result.remaining);
       if (before === 0) {
-        setPendingUploadStatusMessage("No pending uploads.");
+        setPendingUploadStatusMessage("Sync queue is clear.");
         return;
       }
       if (result.remaining === 0) {
-        setPendingUploadStatusMessage(`All pending uploads synced (${result.succeeded}).`);
+        setPendingUploadStatusMessage(`Sync complete (${result.succeeded}).`);
         return;
       }
       if (result.succeeded > 0) {
-        setPendingUploadStatusMessage(`Synced ${result.succeeded}. ${result.remaining} still pending.`);
+        setPendingUploadStatusMessage(`Synced ${result.succeeded}. ${result.remaining} still waiting.`);
         return;
       }
-      setPendingUploadStatusMessage(`${result.remaining} uploads still pending.`);
+      setPendingUploadStatusMessage(`${result.remaining} takes still waiting.`);
     } catch (error) {
       const raw = error instanceof Error ? error.message : "Unexpected retry error";
       setPendingUploadStatusMessage(`Retry failed: ${raw}`);
@@ -384,7 +421,7 @@ export function usePracticeState({
   async function handleCreateJourney() {
     const title = newTitle.trim();
     if (!title) {
-      setErrorMessage("Title is required.");
+      setErrorMessage("Journey name is required.");
       return;
     }
 
@@ -394,6 +431,7 @@ export function usePracticeState({
     try {
       const response = await createJourney(token, {
         title,
+        skillPack: newSkillPack,
         category: newCategory.trim() || null,
         goalText: newGoalText.trim() || null,
         captureMode: newCaptureMode,
@@ -401,15 +439,20 @@ export function usePracticeState({
           ? newMilestoneLengthDays
           : 7
       });
-      setJourneys((current) => [response.journey, ...current]);
-      onActiveJourneyChange(response.journey.id);
+      const createdJourney = response.journey;
+      setJourneys((current) => [createdJourney, ...current]);
+      onActiveJourneyChange(createdJourney.id);
       setManageOpen(false);
+      setRecorderStatusMessage(null);
+      setRecorderJourneyId(createdJourney.id);
+      trackEvent("record_tapped", { journeyId: createdJourney.id, context: "journey_create_instant_start" });
       setNewTitle("");
       setNewCategory("");
       setNewGoalText("");
       setNewMilestoneLengthDays(7);
       setNewCaptureMode(mediaMode);
-      setStatusMessage("Journey started. Day 1 is ready.");
+      setNewSkillPack("fitness");
+      setStatusMessage("Journey live. Day 1 camera is open.");
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
     } finally {
@@ -434,7 +477,7 @@ export function usePracticeState({
       if (activeJourneyId === journeyId) {
         onActiveJourneyChange(remainingModeJourneys[0]?.id ?? null);
       }
-      setStatusMessage("Journey closed.");
+      setStatusMessage("Journey archived.");
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
     } finally {
@@ -448,6 +491,7 @@ export function usePracticeState({
     const journeyRule = journeyForSavedClip ? { captureMode: journeyForSavedClip.captureMode } : null;
     const dayCount = journeyRule ? getChapterDayCount(refreshed, journeyRule) : getDayCount(refreshed);
     const streak = journeyRule ? getChapterStreak(refreshed, journeyRule, effectiveNow) : 0;
+    console.log("[ClipSaved] journeyId:", journeyId, "clipCount:", refreshed.length, "dayCount:", dayCount, "streak:", streak, "captureMode:", journeyRule?.captureMode, "clipTypes:", refreshed.map(c => c.captureType).join(","));
     const unlockedMilestone = getUnlockedMilestone(dayCount);
     const newestClip = refreshed[0] ?? null;
     const celebrationPayload = buildSaveCelebration(dayCount, streak, unlockedMilestone?.title ?? null);
@@ -466,21 +510,28 @@ export function usePracticeState({
       playSaveMotion(Math.min(6, Math.max(0, dayCount - 1)), Boolean(unlockedMilestone), newestClip?.videoUrl ?? null);
       playCelebration(celebrationPayload);
     } else if (journeyId === activeJourneyId) {
-      setStatusMessage("Queued clip uploaded to this chapter.");
+      setStatusMessage("Queued take synced to this chapter.");
     }
 
+    // Delay auto-advance so recorder closes first
     if (source === "foreground" && devDateShiftSettings.enabled && devDateShiftSettings.autoAdvanceAfterSave) {
-      void onDevDateShiftSettingsChange({
-        ...devDateShiftSettings,
-        dayOffset: devDateShiftSettings.dayOffset + 1
-      });
+      setTimeout(() => {
+        void onDevDateShiftSettingsChange({
+          ...devDateShiftSettings,
+          dayOffset: devDateShiftSettings.dayOffset + 1
+        });
+      }, 600);
     }
+    return {
+      clipCount: refreshed.length
+    };
   }
 
   async function handleSaveRecordedClip(payload: {
     uri: string;
     durationMs: number;
     recordedAt: string;
+    recordedOn: string;
     captureType: CaptureType;
   }): Promise<{ success: boolean; errorMessage?: string }> {
     if (!recorderJourneyId) {
@@ -490,20 +541,22 @@ export function usePracticeState({
     setClipSaving(true);
     setErrorMessage(null);
     setStatusMessage(null);
-    setRecorderStatusMessage("Saving clip locally...");
+    setRecorderStatusMessage("Saving take locally...");
     const journeyId = recorderJourneyId;
     const dayOffset = devDateShiftSettings.enabled ? devDateShiftSettings.dayOffset : 0;
     const effectiveRecordedAt = applyDayOffset(payload.recordedAt, dayOffset);
+    const effectiveRecordedOn = applyDayOffsetToDayKey(payload.recordedOn, dayOffset);
     try {
       const queuedItem = await enqueueClipUpload({
         journeyId,
         captureType: payload.captureType,
         fileUri: payload.uri,
         durationMs: payload.durationMs,
-        recordedAt: effectiveRecordedAt
+        recordedAt: effectiveRecordedAt,
+        recordedOn: effectiveRecordedOn
       });
       setPendingUploadCount((value) => value + 1);
-      setRecorderStatusMessage("Upload pending...");
+      setRecorderStatusMessage("Sync queued...");
       trackEvent("clip_upload_queued", { journeyId: queuedItem.journeyId });
 
       const processed = await processClipUploadQueue(token, {
@@ -515,7 +568,7 @@ export function usePracticeState({
             return;
           }
           if (event.type === "failed") {
-            setRecorderStatusMessage("Upload failed. Retrying in background...");
+            setRecorderStatusMessage("Sync failed. Retrying in background...");
             return;
           }
           if (event.type === "success") {
@@ -525,8 +578,8 @@ export function usePracticeState({
       });
 
       if (!processed.target?.success) {
-        setStatusMessage("Clip saved locally. Upload will retry in the background.");
-        setPendingUploadStatusMessage("Clip saved locally. Upload pending in background.");
+        setStatusMessage("Take saved locally. Sync will retry in the background.");
+        setPendingUploadStatusMessage("Take saved locally. Sync queued in background.");
         await refreshPendingUploadCount();
         setRecorderJourneyId(null);
         setRecorderStatusMessage(null);
@@ -534,7 +587,21 @@ export function usePracticeState({
       }
 
       onActiveJourneyChange(journeyId);
-      await applyClipSavedState(journeyId, "foreground");
+      const saveState = await applyClipSavedState(journeyId, "foreground");
+      if (
+        autoReminderSetupLoadedRef.current &&
+        !autoReminderSetupCompletedRef.current &&
+        !autoReminderSuggestion &&
+        saveState.clipCount === 1
+      ) {
+        const capturedAt = new Date(effectiveRecordedAt);
+        if (!Number.isNaN(capturedAt.getTime())) {
+          setAutoReminderSuggestion({
+            hour: capturedAt.getHours(),
+            minute: capturedAt.getMinutes()
+          });
+        }
+      }
       setRecorderJourneyId(null);
       setRecorderStatusMessage(null);
       return { success: true };
@@ -587,6 +654,13 @@ export function usePracticeState({
   const recorderDay = Math.max(1, recorderQualifiedDayCount + (recorderHasQualifiedToday ? 0 : 1));
   const recorderReferenceClipUrl =
     recorderClips.find((clip) => clip.captureType === recorderCaptureType)?.videoUrl ?? recorderClips[0]?.videoUrl ?? null;
+
+  async function acknowledgeAutoReminderSuggestion() {
+    setAutoReminderSuggestion(null);
+    autoReminderSetupCompletedRef.current = true;
+    await writeAutoReminderSetupCompleted();
+  }
+
   return {
     journeys: modeJourneys,
     loading,
@@ -607,6 +681,8 @@ export function usePracticeState({
     setNewMilestoneLengthDays,
     newCaptureMode,
     setNewCaptureMode,
+    newSkillPack,
+    setNewSkillPack,
     clipsByJourney,
     activeClip,
     setActiveClip,
@@ -649,6 +725,8 @@ export function usePracticeState({
     recorderJourney,
     recorderCaptureType,
     recorderDay,
-    recorderReferenceClipUrl
+    recorderReferenceClipUrl,
+    autoReminderSuggestion,
+    acknowledgeAutoReminderSuggestion
   };
 }

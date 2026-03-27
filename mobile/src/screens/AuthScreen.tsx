@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { GlassSurface } from "../components/GlassSurface";
 import { theme } from "../theme";
@@ -63,11 +64,16 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
           }
         ]}
       >
-        <Text style={styles.title}>{isSignup ? "Create account" : "Welcome back"}</Text>
-        <Text style={styles.subtitle}>{isSignup ? "Start your first Hone journey." : "Log in to continue your streak."}</Text>
+        <View style={[styles.heroOrb, styles.heroOrbOne]} />
+        <View style={[styles.heroOrb, styles.heroOrbTwo]} />
+        <View style={styles.brandPill}>
+          <Text style={styles.brandPillText}>HONE</Text>
+        </View>
+        <Text style={styles.title}>{isSignup ? "start account" : "welcome back"}</Text>
+        <Text style={styles.subtitle}>{isSignup ? "one take a day. that's it." : "pick up where you left off"}</Text>
       </Animated.View>
 
-      <GlassSurface style={styles.formCard}>
+      <GlassSurface style={styles.formCard} intensity={22}>
         <View style={styles.modeRow}>
           <Pressable
             style={[styles.modeButton, mode === "login" ? styles.modeButtonActive : undefined]}
@@ -76,7 +82,7 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
               onModeChange("login");
             }}
           >
-            <Text style={[styles.modeText, mode === "login" ? styles.modeTextActive : undefined]}>Login</Text>
+            <Text style={[styles.modeText, mode === "login" ? styles.modeTextActive : undefined]}>sign in</Text>
           </Pressable>
           <Pressable
             style={[styles.modeButton, mode === "signup" ? styles.modeButtonActive : undefined]}
@@ -85,42 +91,44 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
               onModeChange("signup");
             }}
           >
-            <Text style={[styles.modeText, mode === "signup" ? styles.modeTextActive : undefined]}>Sign up</Text>
+            <Text style={[styles.modeText, mode === "signup" ? styles.modeTextActive : undefined]}>create</Text>
           </Pressable>
         </View>
 
         {isSignup ? (
           <TextInput
             style={styles.input}
-            placeholder="Display name"
+            placeholder="name"
             autoCapitalize="words"
             value={displayName}
             onChangeText={setDisplayName}
             editable={!loading}
-            placeholderTextColor="#7891af"
+            placeholderTextColor="#b0a090"
           />
         ) : null}
 
+        <Text style={styles.inputLabel}>email address</Text>
         <TextInput
           style={styles.input}
-          placeholder="Email"
+          placeholder="you@domain.com"
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
           value={email}
           onChangeText={setEmail}
           editable={!loading}
-          placeholderTextColor="#7891af"
+          placeholderTextColor="#b0a090"
         />
+        <Text style={styles.inputLabel}>password</Text>
         <TextInput
           style={styles.input}
-          placeholder="Password"
+          placeholder="enter password"
           secureTextEntry
           autoCapitalize="none"
           value={password}
           onChangeText={setPassword}
           editable={!loading}
-          placeholderTextColor="#7891af"
+          placeholderTextColor="#b0a090"
         />
 
         {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
@@ -134,7 +142,14 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
           onPress={handleSubmit}
           disabled={loading}
         >
-          <Text style={styles.submitText}>{loading ? "Please wait..." : isSignup ? "Create account" : "Login"}</Text>
+          <LinearGradient
+            colors={loading ? ["#c9a07a", "#b8906a"] : ["#ff8b2b", "#ff5a1f"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.submitGradient}
+          >
+            <Text style={styles.submitText}>{loading ? "working..." : isSignup ? "start account" : "sign in"}</Text>
+          </LinearGradient>
         </Pressable>
       </GlassSurface>
     </ScrollView>
@@ -144,61 +159,129 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 18,
-    paddingBottom: 24
+    paddingBottom: 28
   },
   hero: {
-    marginTop: 18,
-    marginBottom: 12
+    marginTop: 22,
+    marginBottom: 14,
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,138,43,0.18)",
+    backgroundColor: "rgba(255,248,240,0.88)"
+  },
+  heroOrb: {
+    position: "absolute",
+    borderRadius: 999
+  },
+  heroOrbOne: {
+    width: 176,
+    height: 176,
+    right: -54,
+    top: -72,
+    backgroundColor: "rgba(255,138,43,0.14)"
+  },
+  heroOrbTwo: {
+    width: 124,
+    height: 124,
+    left: -38,
+    bottom: -50,
+    backgroundColor: "rgba(255,90,31,0.10)"
+  },
+  brandPill: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,138,43,0.35)",
+    backgroundColor: "rgba(255,243,230,0.82)",
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  brandPillText: {
+    color: "#ea3d00",
+    fontSize: 11,
+    letterSpacing: 0.15,
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
   },
   title: {
-    fontSize: 42,
-    lineHeight: 46,
+    marginTop: 8,
+    fontSize: 44,
+    lineHeight: 48,
     fontWeight: "800",
-    color: theme.colors.textPrimary
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display
   },
   subtitle: {
-    marginTop: 6,
+    marginTop: 8,
     color: theme.colors.textSecondary,
-    fontSize: 17
+    fontSize: 16,
+    lineHeight: 22,
+    fontFamily: theme.typography.body
   },
   formCard: {
-    padding: 14,
-    borderRadius: 24
+    padding: 16,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(255,255,255,0.8)"
   },
   modeRow: {
     flexDirection: "row",
     marginBottom: 12,
-    gap: 10
+    gap: 10,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "rgba(255,138,43,0.2)",
+    backgroundColor: "rgba(255,243,230,0.6)",
+    padding: 4
   },
   modeButton: {
     flex: 1,
-    borderRadius: 14,
+    borderRadius: 13,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.52)",
-    backgroundColor: "rgba(255,255,255,0.2)"
+    borderColor: "transparent",
+    backgroundColor: "transparent"
   },
   modeButtonActive: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent
+    borderColor: "rgba(255,138,43,0.6)",
+    backgroundColor: "rgba(255,90,31,0.9)"
   },
   modeText: {
-    color: theme.colors.textSecondary,
+    color: "#8a6a4a",
     fontWeight: "700",
     textAlign: "center",
-    paddingVertical: 10
+    paddingVertical: 10,
+    letterSpacing: 0.3,
+    fontFamily: theme.typography.label
   },
   modeTextActive: {
-    color: "#eff6ff"
+    color: "#fff5ee",
+    fontFamily: theme.typography.heading
+  },
+  inputLabel: {
+    marginTop: 10,
+    marginBottom: 4,
+    color: "#7a6a56",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   input: {
-    marginTop: 10,
-    backgroundColor: "rgba(255,255,255,0.48)",
-    borderRadius: 14,
+    marginTop: 0,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.64)",
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    color: theme.colors.textPrimary
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 13,
+    paddingVertical: 13,
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.body
   },
   error: {
     marginTop: 12,
@@ -206,22 +289,37 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   submitButton: {
-    marginTop: 16,
-    borderRadius: 14,
-    backgroundColor: theme.colors.accent,
+    marginTop: 18,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 13
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,138,43,0.4)",
+    shadowColor: "#cc4400",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4
   },
   submitButtonLoading: {
-    backgroundColor: "#6d86a7"
+    borderColor: "rgba(156,188,223,0.48)",
+    shadowOpacity: 0.12
   },
   submitButtonPressed: {
-    opacity: 0.9
+    opacity: 0.94
+  },
+  submitGradient: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14
   },
   submitText: {
-    color: "#eaf4ff",
+    color: "#fff8f2",
     fontWeight: "800",
-    fontSize: 18
+    fontSize: 15,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.heading
   }
 });

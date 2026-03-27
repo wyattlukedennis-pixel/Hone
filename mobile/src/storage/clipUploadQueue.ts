@@ -15,6 +15,7 @@ export type ClipUploadQueueItem = {
   fileUri: string;
   durationMs: number;
   recordedAt: string;
+  recordedOn: string;
   status: ClipUploadQueueStatus;
   attempts: number;
   createdAt: string;
@@ -57,6 +58,13 @@ type ProcessQueueResult = {
 };
 
 let queueLock: Promise<void> = Promise.resolve();
+
+function toLocalDayKey(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function inferUploadMedia(fileUri: string, captureType: "video" | "photo") {
   const normalized = fileUri.split("?")[0].toLowerCase();
@@ -143,6 +151,10 @@ async function readQueue() {
         fileUri: String(item.fileUri),
         durationMs: typeof item.durationMs === "number" ? item.durationMs : 1000,
         recordedAt: typeof item.recordedAt === "string" ? item.recordedAt : new Date().toISOString(),
+        recordedOn:
+          typeof item.recordedOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.recordedOn)
+            ? item.recordedOn
+            : toLocalDayKey(new Date(typeof item.recordedAt === "string" ? item.recordedAt : Date.now())),
         status:
           item.status === "uploading" ||
           item.status === "uploaded" ||
@@ -184,6 +196,7 @@ export async function enqueueClipUpload(input: {
   fileUri: string;
   durationMs: number;
   recordedAt: string;
+  recordedOn: string;
 }) {
   return withQueueLock(async () => {
     const queue = await readQueue();
@@ -194,6 +207,7 @@ export async function enqueueClipUpload(input: {
       fileUri: input.fileUri,
       durationMs: input.durationMs,
       recordedAt: input.recordedAt,
+      recordedOn: input.recordedOn,
       status: "queued",
       attempts: 0,
       createdAt: new Date().toISOString(),
@@ -272,6 +286,7 @@ export async function processClipUploadQueue(token: string, options: ProcessQueu
           uploadId: upload.uploadId,
           durationMs: item.durationMs,
           recordedAt: item.recordedAt,
+          recordedOn: item.recordedOn,
           captureType: item.captureType
         });
 

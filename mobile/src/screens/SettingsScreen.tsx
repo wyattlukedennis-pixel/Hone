@@ -11,6 +11,9 @@ import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
 import type { HapticsMode } from "../types/haptics";
 import { formatDailyMomentTime } from "../utils/dailyMoment";
+import { clearOnboardingDraft } from "../storage/onboardingStorage";
+import { hasRevealExportPurchase, purchaseRevealExport, resetPurchaseState } from "../utils/purchases";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 type SettingsScreenProps = {
   user: User;
@@ -28,7 +31,7 @@ type SettingsScreenProps = {
 };
 
 function formatOffsetLabel(offset: number) {
-  if (offset === 0) return "Today";
+  if (offset === 0) return "live";
   if (offset > 0) return `+${offset} day${offset === 1 ? "" : "s"}`;
   const absolute = Math.abs(offset);
   return `-${absolute} day${absolute === 1 ? "" : "s"}`;
@@ -58,6 +61,11 @@ export function SettingsScreen({
   const [uploadsMessage, setUploadsMessage] = useState<{ text: string; success: boolean } | null>(null);
   const [timePickerOpen, setTimePickerOpen] = useState(false);
 
+  async function resetOnboardingState() {
+    await AsyncStorage.removeItem("hone.onboarding.complete.v1");
+    await clearOnboardingDraft();
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -85,20 +93,20 @@ export function SettingsScreen({
       contentContainerStyle={[styles.content, { paddingBottom: Math.max(124, insets.bottom + 96) }]}
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.title}>Profile</Text>
-      <Text style={styles.subtitle}>Account and daily practice preferences.</Text>
+      <Text style={styles.title}>profile</Text>
+      <Text style={styles.subtitle}>account + daily cues</Text>
 
       <GlassSurface style={styles.card}>
-        <Text style={styles.accountLabel}>Signed in as</Text>
+        <Text style={styles.accountLabel}>account</Text>
         <Text style={styles.accountValue}>{user.email}</Text>
       </GlassSurface>
 
       <GlassSurface style={styles.card}>
-        <Text style={styles.cardLabel}>Daily Reminder</Text>
-        <Text style={styles.cardValue}>{formatDailyMomentTime(dailyMomentSettings)} Practice Prompt</Text>
-        <Text style={styles.cardHint}>A gentle nudge to show up and keep your streak alive.</Text>
+        <Text style={styles.cardLabel}>daily cue</Text>
+        <Text style={styles.cardValue}>{formatDailyMomentTime(dailyMomentSettings)} practice cue</Text>
+        <Text style={styles.cardHint}>a nudge so you don't forget</Text>
         <View style={styles.reminderRow}>
-          <Text style={styles.reminderLabel}>Daily Moment</Text>
+          <Text style={styles.reminderLabel}>daily cue</Text>
           <TactilePressable
             style={[styles.reminderToggle, dailyMomentSettings.enabled ? styles.reminderToggleOn : undefined]}
             onPress={() =>
@@ -109,7 +117,7 @@ export function SettingsScreen({
             }
           >
             <Text style={[styles.reminderToggleText, dailyMomentSettings.enabled ? styles.reminderToggleTextOn : undefined]}>
-              {dailyMomentSettings.enabled ? "On" : "Off"}
+              {dailyMomentSettings.enabled ? "on" : "off"}
             </Text>
           </TactilePressable>
         </View>
@@ -120,7 +128,7 @@ export function SettingsScreen({
               setTimePickerOpen(true);
             }}
           >
-            <Text style={styles.reminderAdjustText}>Set reminder time</Text>
+            <Text style={styles.reminderAdjustText}>set cue time</Text>
           </TactilePressable>
           <TactilePressable
             style={[styles.reminderAdjustChip, dailyMomentSettings.autoOpenRecorder ? styles.reminderAdjustChipActive : undefined]}
@@ -132,19 +140,19 @@ export function SettingsScreen({
             }
           >
             <Text style={[styles.reminderAdjustText, dailyMomentSettings.autoOpenRecorder ? styles.reminderAdjustTextActive : undefined]}>
-              Auto-open
+              auto-open recorder
             </Text>
           </TactilePressable>
         </View>
       </GlassSurface>
 
-      <GlassSurface style={styles.card}>
-        <Text style={styles.cardLabel}>Uploads</Text>
-        <Text style={styles.cardValue}>{pendingUploadsLoading ? "Checking..." : `${pendingUploadsCount} pending`}</Text>
+      {false && (<GlassSurface style={styles.card}>
+        <Text style={styles.cardLabel}>sync queue</Text>
+        <Text style={styles.cardValue}>{pendingUploadsLoading ? "checking sync..." : `${pendingUploadsCount} waiting`}</Text>
         <Text style={styles.cardHint}>
           {pendingUploadsCount > 0
-            ? "Some clips are still syncing. You can retry now."
-            : "All recorded clips are synced."}
+            ? "some takes still syncing. tap retry."
+            : "all synced"}
         </Text>
         <View style={styles.uploadActions}>
           <TactilePressable
@@ -159,7 +167,7 @@ export function SettingsScreen({
             }}
             disabled={retryingUploads}
           >
-            <Text style={styles.uploadActionButtonText}>{retryingUploads ? "Retrying..." : "Retry now"}</Text>
+            <Text style={styles.uploadActionButtonText}>{retryingUploads ? "retrying..." : "retry sync"}</Text>
           </TactilePressable>
           <TactilePressable
             style={styles.uploadRefreshButton}
@@ -170,25 +178,25 @@ export function SettingsScreen({
               setPendingUploadsLoading(false);
             }}
           >
-            <Text style={styles.uploadRefreshButtonText}>Refresh</Text>
+            <Text style={styles.uploadRefreshButtonText}>refresh count</Text>
           </TactilePressable>
         </View>
         {uploadsMessage ? (
-          <Text style={[styles.uploadMessage, uploadsMessage.success ? styles.uploadMessageSuccess : styles.uploadMessageDanger]}>
-            {uploadsMessage.text}
+          <Text style={[styles.uploadMessage, uploadsMessage!.success ? styles.uploadMessageSuccess : styles.uploadMessageDanger]}>
+            {uploadsMessage!.text}
           </Text>
         ) : null}
-      </GlassSurface>
+      </GlassSurface>)}
 
-      <GlassSurface style={styles.card}>
-        <Text style={styles.cardLabel}>Haptics</Text>
-        <Text style={styles.cardValue}>Touch feedback intensity</Text>
-        <Text style={styles.cardHint}>Choose how strong taps and interaction cues should feel.</Text>
+      {false && (<GlassSurface style={styles.card}>
+        <Text style={styles.cardLabel}>haptics</Text>
+        <Text style={styles.cardValue}>tap response strength</Text>
+        <Text style={styles.cardHint}>how strong taps feel</Text>
         <View style={styles.hapticsRow}>
           {[
-            { key: "off" as const, label: "Off" },
-            { key: "subtle" as const, label: "Subtle" },
-            { key: "standard" as const, label: "Standard" }
+            { key: "off" as const, label: "off" },
+            { key: "subtle" as const, label: "subtle" },
+            { key: "standard" as const, label: "standard" }
           ].map((entry) => (
             <TactilePressable
               key={entry.key}
@@ -201,13 +209,13 @@ export function SettingsScreen({
             </TactilePressable>
           ))}
         </View>
-      </GlassSurface>
+      </GlassSurface>)}
 
       {isDevToolsVisible ? (
         <GlassSurface style={styles.card}>
-          <Text style={styles.cardLabel}>Dev Tools</Text>
-          <Text style={styles.cardValue}>Date Shift Testing</Text>
-          <Text style={styles.cardHint}>Simulate future days so you can test milestones and comparisons in one sitting.</Text>
+          <Text style={styles.cardLabel}>dev tools</Text>
+          <Text style={styles.cardValue}>date shift testing</Text>
+          <Text style={styles.cardHint}>simulate future days so you can test milestones and comparisons in one sitting.</Text>
 
           <View style={styles.devPresetRow}>
             <TactilePressable
@@ -220,13 +228,13 @@ export function SettingsScreen({
                 })
               }
             >
-              <Text style={styles.devPresetButtonText}>Simulate 30 Days</Text>
+              <Text style={styles.devPresetButtonText}>simulate 30 takes</Text>
             </TactilePressable>
-            <Text style={styles.devPresetHint}>Record and save 30 clips. Day offset advances after each save.</Text>
+            <Text style={styles.devPresetHint}>record and save 30 takes. day offset advances after each save.</Text>
           </View>
 
           <View style={styles.devRow}>
-            <Text style={styles.devRowLabel}>Date shift mode</Text>
+            <Text style={styles.devRowLabel}>date shift</Text>
             <TactilePressable
               style={[styles.devToggle, devDateShiftSettings.enabled ? styles.devToggleOn : undefined]}
               onPress={() =>
@@ -237,12 +245,12 @@ export function SettingsScreen({
               }
             >
               <Text style={[styles.devToggleText, devDateShiftSettings.enabled ? styles.devToggleTextOn : undefined]}>
-                {devDateShiftSettings.enabled ? "On" : "Off"}
+                {devDateShiftSettings.enabled ? "on" : "off"}
               </Text>
             </TactilePressable>
           </View>
 
-          <Text style={styles.devOffsetLabel}>Current offset: {formatOffsetLabel(devDateShiftSettings.dayOffset)}</Text>
+          <Text style={styles.devOffsetLabel}>current shift: {formatOffsetLabel(devDateShiftSettings.dayOffset)}</Text>
           <View style={styles.devOffsetActions}>
             {[
               { label: "-7", value: -7 },
@@ -266,7 +274,7 @@ export function SettingsScreen({
           </View>
 
           <View style={styles.devRow}>
-            <Text style={styles.devRowLabel}>Auto-advance after save</Text>
+            <Text style={styles.devRowLabel}>auto-step day after save</Text>
             <TactilePressable
               style={[styles.devToggle, devDateShiftSettings.autoAdvanceAfterSave ? styles.devToggleOn : undefined]}
               onPress={() =>
@@ -277,7 +285,7 @@ export function SettingsScreen({
               }
             >
               <Text style={[styles.devToggleText, devDateShiftSettings.autoAdvanceAfterSave ? styles.devToggleTextOn : undefined]}>
-                {devDateShiftSettings.autoAdvanceAfterSave ? "On" : "Off"}
+                {devDateShiftSettings.autoAdvanceAfterSave ? "on" : "off"}
               </Text>
             </TactilePressable>
           </View>
@@ -292,7 +300,7 @@ export function SettingsScreen({
               })
             }
           >
-            <Text style={styles.devResetText}>Reset Dev Tools</Text>
+            <Text style={styles.devResetText}>reset dev tools</Text>
           </TactilePressable>
 
           <TactilePressable
@@ -306,7 +314,35 @@ export function SettingsScreen({
             }}
             disabled={clearingRecordings}
           >
-            <Text style={styles.devDangerActionText}>{clearingRecordings ? "Clearing..." : "Clear All Recordings"}</Text>
+            <Text style={styles.devDangerActionText}>{clearingRecordings ? "clearing..." : "clear all takes"}</Text>
+          </TactilePressable>
+          <TactilePressable
+            style={styles.devDangerAction}
+            onPress={async () => {
+              await resetOnboardingState();
+              await resetPurchaseState();
+              setDevMessage({ text: "resetting... logging out now.", success: true });
+              // Log out so the onboarding gate is visible on next launch
+              setTimeout(() => { void onLogout(); }, 500);
+            }}
+          >
+            <Text style={styles.devDangerActionText}>reset onboarding + paywall</Text>
+          </TactilePressable>
+          <TactilePressable
+            style={[styles.devAction, hasRevealExportPurchase() ? styles.devActionActive : undefined]}
+            onPress={async () => {
+              if (hasRevealExportPurchase()) {
+                await resetPurchaseState();
+                setDevMessage({ text: "switched to free tier", success: true });
+              } else {
+                await purchaseRevealExport();
+                setDevMessage({ text: "switched to paid tier", success: true });
+              }
+            }}
+          >
+            <Text style={styles.devActionText}>
+              {hasRevealExportPurchase() ? "🟢 paid — tap to switch to free" : "⚪ free — tap to switch to paid"}
+            </Text>
           </TactilePressable>
           {devMessage ? <Text style={[styles.devMessage, devMessage.success ? styles.devMessageSuccess : styles.devMessageDanger]}>{devMessage.text}</Text> : null}
         </GlassSurface>
@@ -319,7 +355,7 @@ export function SettingsScreen({
         }}
         disabled={loggingOut}
       >
-        <Text style={styles.logoutText}>{loggingOut ? "Logging out..." : "Log out"}</Text>
+        <Text style={styles.logoutText}>{loggingOut ? "signing out..." : "sign out"}</Text>
       </TactilePressable>
 
       <Modal visible={timePickerOpen} transparent animationType="slide" onRequestClose={() => setTimePickerOpen(false)}>
@@ -329,12 +365,12 @@ export function SettingsScreen({
           </View>
           <View style={[styles.timePickerSheet, { paddingBottom: Math.max(18, insets.bottom + 10) }]}>
             <View style={styles.timePickerHeader}>
-              <Text style={styles.timePickerTitle}>Choose reminder time</Text>
+              <Text style={styles.timePickerTitle}>choose cue time</Text>
               <TactilePressable style={styles.timePickerDone} onPress={() => setTimePickerOpen(false)}>
-                <Text style={styles.timePickerDoneText}>Done</Text>
+                <Text style={styles.timePickerDoneText}>done</Text>
               </TactilePressable>
             </View>
-            <Text style={styles.timePickerCurrent}>{formatDailyMomentTime(dailyMomentSettings)} daily</Text>
+            <Text style={styles.timePickerCurrent}>{formatDailyMomentTime(dailyMomentSettings)} daily cue</Text>
             <TimeWheelPicker
               hour24={dailyMomentSettings.hour}
               minute={dailyMomentSettings.minute}
@@ -365,39 +401,47 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 36,
     fontWeight: "800",
-    color: theme.colors.textPrimary
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display
   },
   subtitle: {
     marginTop: 6,
     fontSize: 17,
-    color: theme.colors.textSecondary
+    color: theme.colors.textSecondary,
+    lineHeight: 22,
+    fontFamily: theme.typography.body
   },
   card: {
     marginTop: 16,
-    borderRadius: 22,
+    borderRadius: 24,
     padding: 16
   },
   accountLabel: {
     color: theme.colors.textSecondary,
     fontSize: 12,
-    fontWeight: "700"
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    fontFamily: theme.typography.label
   },
   accountValue: {
     marginTop: 6,
     color: theme.colors.textPrimary,
     fontSize: 14,
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   cardLabel: {
     color: theme.colors.textSecondary,
     fontSize: 13,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: theme.typography.label
   },
   cardValue: {
     marginTop: 6,
     color: theme.colors.textPrimary,
     fontSize: 18,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
   },
   cardHint: {
     marginTop: 8,
@@ -413,7 +457,8 @@ const styles = StyleSheet.create({
   reminderLabel: {
     flex: 1,
     color: theme.colors.textPrimary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: theme.typography.label
   },
   reminderToggle: {
     borderRadius: 999,
@@ -424,8 +469,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   reminderToggleOn: {
-    backgroundColor: "rgba(14,99,255,0.16)",
-    borderColor: "rgba(14,99,255,0.45)"
+    backgroundColor: "rgba(255,90,31,0.12)",
+    borderColor: "rgba(255,90,31,0.35)"
   },
   reminderToggleText: {
     color: theme.colors.textSecondary,
@@ -450,8 +495,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   reminderAdjustChipActive: {
-    borderColor: "rgba(14,99,255,0.45)",
-    backgroundColor: "rgba(14,99,255,0.14)"
+    borderColor: "rgba(255,90,31,0.35)",
+    backgroundColor: "rgba(255,90,31,0.10)"
   },
   reminderAdjustText: {
     color: theme.colors.textSecondary,
@@ -469,8 +514,8 @@ const styles = StyleSheet.create({
   uploadActionButton: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.45)",
-    backgroundColor: "rgba(14,99,255,0.14)",
+    borderColor: "rgba(255,90,31,0.35)",
+    backgroundColor: "rgba(255,90,31,0.10)",
     paddingHorizontal: 12,
     paddingVertical: 8
   },
@@ -519,8 +564,8 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   hapticsChipActive: {
-    borderColor: "rgba(14,99,255,0.52)",
-    backgroundColor: "rgba(14,99,255,0.18)"
+    borderColor: "rgba(255,90,31,0.40)",
+    backgroundColor: "rgba(255,90,31,0.12)"
   },
   hapticsChipText: {
     color: theme.colors.textSecondary,
@@ -546,8 +591,8 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.45)",
-    backgroundColor: "rgba(14,99,255,0.14)",
+    borderColor: "rgba(255,90,31,0.35)",
+    backgroundColor: "rgba(255,90,31,0.10)",
     paddingHorizontal: 12,
     paddingVertical: 8
   },
@@ -574,8 +619,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   devToggleOn: {
-    backgroundColor: "rgba(14,99,255,0.16)",
-    borderColor: "rgba(14,99,255,0.45)"
+    backgroundColor: "rgba(255,90,31,0.12)",
+    borderColor: "rgba(255,90,31,0.35)"
   },
   devToggleText: {
     color: theme.colors.textSecondary,
@@ -637,6 +682,25 @@ const styles = StyleSheet.create({
     color: theme.colors.danger,
     fontWeight: "700"
   },
+  devAction: {
+    marginTop: 10,
+    alignSelf: "stretch",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(0,0,0,0.03)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  devActionActive: {
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(232,69,10,0.08)",
+  },
+  devActionText: {
+    color: "#101010",
+    fontWeight: "700",
+    fontSize: 13,
+  },
   devMessage: {
     marginTop: 8,
     fontWeight: "600"
@@ -676,7 +740,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.66)",
-    backgroundColor: "rgba(226,236,248,0.98)",
+    backgroundColor: "rgba(244,239,230,0.98)",
     paddingTop: 16,
     paddingHorizontal: 20
   },

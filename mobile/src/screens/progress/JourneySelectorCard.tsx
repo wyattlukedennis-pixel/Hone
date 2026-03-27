@@ -43,13 +43,19 @@ export function JourneySelectorCard({ journeys, activeJourneyId, onSelectJourney
 const styles = StyleSheet.create({
   selectorCard: {
     marginTop: 10,
-    borderRadius: 20,
+    borderRadius: theme.shape.cardRadiusLg,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     padding: 12
   },
   selectorTitle: {
     color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 13
+    fontWeight: "800",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
   },
   selectorWrap: {
     marginTop: 10,
@@ -58,20 +64,24 @@ const styles = StyleSheet.create({
     gap: 8
   },
   selectorPill: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.66)",
-    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)",
     paddingHorizontal: 10,
     paddingVertical: 8
   },
   selectorPillActive: {
-    borderColor: "rgba(47,128,237,0.5)",
-    backgroundColor: "rgba(47,128,237,0.14)"
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(255,90,31,0.26)"
   },
   selectorPillText: {
     color: theme.colors.textSecondary,
-    fontWeight: "700"
+    fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   },
   selectorPillTextActive: {
     color: theme.colors.textPrimary

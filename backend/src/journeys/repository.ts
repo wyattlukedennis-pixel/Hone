@@ -4,6 +4,7 @@ type JourneyRow = {
   id: string;
   user_id: string;
   title: string;
+  skill_pack: "fitness" | "drawing" | "instrument";
   category: string | null;
   color_theme: string | null;
   goal_text: string | null;
@@ -31,10 +32,22 @@ type JourneyRevealRow = {
   created_at: Date | string;
 };
 
+type JourneyWeeklyQuestRow = {
+  id: string;
+  journey_id: string;
+  user_id: string;
+  week_key: string;
+  quest_id: string;
+  reward_xp: number;
+  completed_at: Date | string;
+  created_at: Date | string;
+};
+
 export type Journey = {
   id: string;
   userId: string;
   title: string;
+  skillPack: "fitness" | "drawing" | "instrument";
   category: string | null;
   colorTheme: string | null;
   goalText: string | null;
@@ -62,8 +75,20 @@ export type JourneyReveal = {
   createdAt: Date;
 };
 
+export type JourneyWeeklyQuestCompletion = {
+  id: string;
+  journeyId: string;
+  userId: string;
+  weekKey: string;
+  questId: string;
+  rewardXp: number;
+  completedAt: Date;
+  createdAt: Date;
+};
+
 type JourneyUpdates = {
   title?: string;
+  skillPack?: "fitness" | "drawing" | "instrument";
   category?: string | null;
   colorTheme?: string | null;
   goalText?: string | null;
@@ -90,8 +115,13 @@ function toDate(value: Date | string) {
 }
 
 function toDateOnly(value: Date | string) {
-  const date = value instanceof Date ? value : new Date(value);
-  return date.toISOString().slice(0, 10);
+  if (typeof value === "string") {
+    return value.includes("T") ? value.slice(0, 10) : value;
+  }
+  const year = value.getUTCFullYear();
+  const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getUTCDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function mapJourney(row: JourneyRow): Journey {
@@ -99,6 +129,7 @@ function mapJourney(row: JourneyRow): Journey {
     id: row.id,
     userId: row.user_id,
     title: row.title,
+    skillPack: row.skill_pack,
     category: row.category,
     colorTheme: row.color_theme,
     goalText: row.goal_text,
@@ -129,10 +160,24 @@ function mapJourneyReveal(row: JourneyRevealRow): JourneyReveal {
   };
 }
 
+function mapJourneyWeeklyQuest(row: JourneyWeeklyQuestRow): JourneyWeeklyQuestCompletion {
+  return {
+    id: row.id,
+    journeyId: row.journey_id,
+    userId: row.user_id,
+    weekKey: row.week_key,
+    questId: row.quest_id,
+    rewardXp: row.reward_xp,
+    completedAt: toDate(row.completed_at),
+    createdAt: toDate(row.created_at)
+  };
+}
+
 export async function listActiveJourneysByUser(pool: Pool, userId: string) {
   const result = await pool.query<JourneyRow>(
     `
       SELECT id, user_id, title, category, color_theme, goal_text,
+             skill_pack,
              capture_mode,
              started_at, archived_at,
              milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
@@ -152,6 +197,7 @@ export async function createJourney(
   params: {
     userId: string;
     title: string;
+    skillPack: "fitness" | "drawing" | "instrument";
     category: string | null;
     colorTheme: string | null;
     goalText: string | null;
@@ -161,15 +207,16 @@ export async function createJourney(
 ) {
   const result = await pool.query<JourneyRow>(
     `
-      INSERT INTO journeys (user_id, title, category, color_theme, goal_text, capture_mode, milestone_length_days)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO journeys (user_id, title, skill_pack, category, color_theme, goal_text, capture_mode, milestone_length_days)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, user_id, title, category, color_theme, goal_text,
+                skill_pack,
                 capture_mode,
                 started_at, archived_at,
                 milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
                 created_at, updated_at
     `,
-    [params.userId, params.title, params.category, params.colorTheme, params.goalText, params.captureMode, params.milestoneLengthDays]
+    [params.userId, params.title, params.skillPack, params.category, params.colorTheme, params.goalText, params.captureMode, params.milestoneLengthDays]
   );
 
   return mapJourney(result.rows[0]);
@@ -183,6 +230,7 @@ export async function findJourneyByIdForUser(
   const result = await pool.query<JourneyRow>(
     `
       SELECT id, user_id, title, category, color_theme, goal_text,
+             skill_pack,
              capture_mode,
              started_at, archived_at,
              milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
@@ -213,6 +261,11 @@ export async function updateJourney(
   if (params.updates.title !== undefined) {
     setFragments.push(`title = $${index++}`);
     values.push(params.updates.title);
+  }
+
+  if (params.updates.skillPack !== undefined) {
+    setFragments.push(`skill_pack = $${index++}`);
+    values.push(params.updates.skillPack);
   }
 
   if (params.updates.category !== undefined) {
@@ -253,6 +306,7 @@ export async function updateJourney(
       SET ${setFragments.join(", ")}
       WHERE id = $${index++} AND user_id = $${index++} AND archived_at IS NULL
       RETURNING id, user_id, title, category, color_theme, goal_text,
+                skill_pack,
                 capture_mode,
                 started_at, archived_at,
                 milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
@@ -271,6 +325,7 @@ export async function archiveJourney(pool: Pool, params: { journeyId: string; us
       SET archived_at = NOW(), updated_at = NOW()
       WHERE id = $1 AND user_id = $2 AND archived_at IS NULL
       RETURNING id, user_id, title, category, color_theme, goal_text,
+                skill_pack,
                 capture_mode,
                 started_at, archived_at,
                 milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
@@ -297,6 +352,50 @@ export async function listJourneyReveals(pool: Pool, params: { journeyId: string
   return result.rows.map(mapJourneyReveal);
 }
 
+export async function listJourneyWeeklyQuestCompletions(
+  pool: Pool,
+  params: { journeyId: string; userId: string; limit?: number }
+) {
+  const cappedLimit = Math.max(1, Math.min(52, params.limit ?? 16));
+  const result = await pool.query<JourneyWeeklyQuestRow>(
+    `
+      SELECT id, journey_id, user_id, week_key, quest_id, reward_xp, completed_at, created_at
+      FROM journey_weekly_quests
+      WHERE journey_id = $1 AND user_id = $2
+      ORDER BY completed_at DESC
+      LIMIT $3
+    `,
+    [params.journeyId, params.userId, cappedLimit]
+  );
+
+  return result.rows.map(mapJourneyWeeklyQuest);
+}
+
+export async function completeJourneyWeeklyQuest(
+  pool: Pool,
+  params: {
+    journeyId: string;
+    userId: string;
+    weekKey: string;
+    questId: string;
+    rewardXp: number;
+  }
+) {
+  const result = await pool.query<JourneyWeeklyQuestRow>(
+    `
+      INSERT INTO journey_weekly_quests (journey_id, user_id, week_key, quest_id, reward_xp)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (journey_id, week_key, quest_id)
+      DO UPDATE
+        SET reward_xp = GREATEST(journey_weekly_quests.reward_xp, EXCLUDED.reward_xp)
+      RETURNING id, journey_id, user_id, week_key, quest_id, reward_xp, completed_at, created_at
+    `,
+    [params.journeyId, params.userId, params.weekKey, params.questId, params.rewardXp]
+  );
+
+  return mapJourneyWeeklyQuest(result.rows[0]);
+}
+
 export async function startNextMilestoneChapter(
   pool: Pool,
   params: {
@@ -312,6 +411,7 @@ export async function startNextMilestoneChapter(
     const journeyResult = await client.query<JourneyRow>(
       `
         SELECT id, user_id, title, category, color_theme, goal_text,
+               skill_pack,
                capture_mode,
                started_at, archived_at,
                milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,
@@ -388,6 +488,7 @@ export async function startNextMilestoneChapter(
             updated_at = NOW()
         WHERE id = $3
         RETURNING id, user_id, title, category, color_theme, goal_text,
+                  skill_pack,
                   capture_mode,
                   started_at, archived_at,
                   milestone_length_days, milestone_started_on, milestone_chapter, milestone_start_day,

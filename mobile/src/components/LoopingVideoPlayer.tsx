@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import type { StyleProp, ViewStyle } from "react-native";
+import { theme } from "../theme";
 import { triggerSelectionHaptic } from "../utils/feedback";
 
 type LoopingVideoPlayerProps = {
@@ -293,7 +294,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: "#0e63ff"
+    backgroundColor: theme.colors.accent
   },
   soundChip: {
     marginTop: 7,

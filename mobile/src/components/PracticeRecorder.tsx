@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
 import { ResizeMode, Video } from "expo-av";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -12,6 +12,7 @@ import { RecorderCaptureTray } from "./recorder/RecorderCaptureTray";
 import { RecorderPermissionGate } from "./recorder/RecorderPermissionGate";
 import { RecorderRecordButton } from "./recorder/RecorderRecordButton";
 import { RecorderTopOverlay } from "./recorder/RecorderTopOverlay";
+import type { SkillPack } from "../types/journey";
 
 type PracticeRecorderProps = {
   visible: boolean;
@@ -20,10 +21,25 @@ type PracticeRecorderProps = {
   journeyTitle?: string;
   dayNumber?: number;
   captureType: "video" | "photo";
-  referenceClipUrl?: string | null;
+  skillPack: SkillPack;
   onCancel: () => void;
-  onSave: (payload: { uri: string; durationMs: number; recordedAt: string; captureType: "video" | "photo" }) => Promise<{ success: boolean; errorMessage?: string }>;
+  onSave: (payload: { uri: string; durationMs: number; recordedAt: string; recordedOn: string; captureType: "video" | "photo" }) => Promise<{ success: boolean; errorMessage?: string }>;
+  referenceClipUrl?: string | null;
 };
+
+type CapturedAsset = {
+  uri: string;
+  durationMs: number;
+  recordedAt: string;
+  recordedOn: string;
+};
+
+function toLocalDayKey(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 export function PracticeRecorder({
   visible,
@@ -32,20 +48,20 @@ export function PracticeRecorder({
   journeyTitle,
   dayNumber,
   captureType,
-  referenceClipUrl,
+  skillPack,
   onCancel,
-  onSave
+  onSave,
+  referenceClipUrl
 }: PracticeRecorderProps) {
   const cameraRef = useRef<CameraView | null>(null);
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [recording, setRecording] = useState(false);
   const [facing, setFacing] = useState<"front" | "back">("front");
-  const [captured, setCaptured] = useState<{ uri: string; durationMs: number; recordedAt: string } | null>(null);
+  const [captured, setCaptured] = useState<CapturedAsset | null>(null);
   const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<number | null>(null);
   const [ticker, setTicker] = useState(0);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
-  const [showReferenceGuide, setShowReferenceGuide] = useState(false);
   const [cameraMounted, setCameraMounted] = useState(false);
   const transition = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
@@ -58,12 +74,10 @@ export function PracticeRecorder({
       setCaptured(null);
       setRecordingStartedAtMs(null);
       setSaveErrorMessage(null);
-      setShowReferenceGuide(false);
       setCameraMounted(false);
       return;
     }
     // Stage the opening: animate sheet first, then mount camera to avoid dropped frames.
-    setShowReferenceGuide(false);
     setCameraMounted(false);
     transition.setValue(0);
     Animated.timing(transition, {
@@ -76,7 +90,7 @@ export function PracticeRecorder({
     }, reducedMotion ? 0 : 140);
 
     return () => clearTimeout(mountTimer);
-  }, [visible, transition]);
+  }, [visible, transition, reducedMotion]);
 
   useEffect(() => {
     if (!recordingStartedAtMs) return;
@@ -90,7 +104,9 @@ export function PracticeRecorder({
     if (!cameraRef.current || !cameraMounted) return;
 
     const startedAt = Date.now();
-    const recordedAtIso = new Date(startedAt).toISOString();
+    const recordedAtDate = new Date(startedAt);
+    const recordedAtIso = recordedAtDate.toISOString();
+    const recordedOn = toLocalDayKey(recordedAtDate);
     if (captureType === "photo") {
       trackEvent("recording_started", { journeyTitle: journeyTitle ?? null, dayNumber: dayNumber ?? null, facing, captureType });
       const result = await cameraRef.current.takePictureAsync({
@@ -101,7 +117,8 @@ export function PracticeRecorder({
         setCaptured({
           uri: result.uri,
           durationMs: 1000,
-          recordedAt: recordedAtIso
+          recordedAt: recordedAtIso,
+          recordedOn
         });
       }
       return;
@@ -120,7 +137,8 @@ export function PracticeRecorder({
         setCaptured({
           uri: result.uri,
           durationMs,
-          recordedAt: recordedAtIso
+          recordedAt: recordedAtIso,
+          recordedOn
         });
       }
     } finally {
@@ -176,83 +194,100 @@ export function PracticeRecorder({
             />
           ) : (
             <View style={styles.container}>
-          {cameraMounted ? <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode={captureType === "photo" ? "picture" : "video"} mute facing={facing} /> : null}
-          {!cameraMounted ? (
-            <View style={styles.cameraBootPlaceholder}>
-              <ActivityIndicator size="small" color="#d6e6fa" />
-              <Text style={styles.cameraBootText}>Preparing camera...</Text>
-            </View>
-          ) : null}
-          {referenceClipUrl && cameraMounted && !captured && showReferenceGuide ? (
-            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              {captureType === "photo" ? (
-                <Image source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-              ) : (
-                <Video source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} shouldPlay isLooping isMuted resizeMode={ResizeMode.COVER} />
-              )}
-              <View style={styles.referenceOverlayMask} />
-            </View>
-          ) : null}
-          <LinearGradient colors={["rgba(8,16,30,0.4)", "rgba(8,16,30,0.06)", "rgba(8,16,30,0.45)"]} style={StyleSheet.absoluteFill} />
-
-            <RecorderTopOverlay
-              paddingTop={Math.max(14, insets.top + 8)}
-              recording={recording}
-              saving={saving}
-              captureType={captureType}
-              journeyTitle={journeyTitle}
-              dayNumber={dayNumber}
-            hasReferenceClip={Boolean(referenceClipUrl)}
-            showReferenceGuide={showReferenceGuide}
-            cameraMounted={cameraMounted}
-            recordingStartedAtMs={recordingStartedAtMs}
-            ticker={ticker}
-            onClose={onCancel}
-            onToggleGuide={() => {
-              setShowReferenceGuide((current) => !current);
-            }}
-            onFlip={() => {
-              trackEvent("camera_flipped", { from: facing, to: facing === "front" ? "back" : "front" });
-              setFacing((value) => (value === "front" ? "back" : "front"));
-            }}
-          />
-
-          <View style={[styles.bottomOverlay, { paddingBottom: safeBottom }]}>
-            {captured ? (
-              <RecorderCaptureTray
-                durationMs={captured.durationMs}
+              <RecorderTopOverlay
+                paddingTop={Math.max(14, insets.top + 8)}
+                recording={recording}
+                saving={saving}
                 captureType={captureType}
-                saving={saving}
-                recording={recording}
-                statusMessage={statusMessage}
-                saveErrorMessage={saveErrorMessage}
-                onCancel={onCancel}
-                onRetake={() => setCaptured(null)}
-                onSave={async () => {
-                  if (!captured) return;
-                  setSaveErrorMessage(null);
-                  const result = await onSave({ ...captured, captureType });
-                  if (!result.success) {
-                    setSaveErrorMessage(result.errorMessage ?? "Failed to save clip.");
-                  }
-                }}
-              />
-            ) : (
-              <RecorderRecordButton
-                recording={recording}
-                saving={saving}
+                skillPack={skillPack}
+                journeyTitle={journeyTitle}
+                dayNumber={dayNumber}
                 cameraMounted={cameraMounted}
-                captureType={captureType}
-                onToggle={() => {
-                  if (captureType === "video" && recording) {
-                    stopRecording();
-                  } else {
-                    void startCapture();
-                  }
+                recordingStartedAtMs={recordingStartedAtMs}
+                ticker={ticker}
+                onClose={onCancel}
+                onFlip={() => {
+                  trackEvent("camera_flipped", { from: facing, to: facing === "front" ? "back" : "front" });
+                  setFacing((value) => (value === "front" ? "back" : "front"));
                 }}
               />
-            )}
-          </View>
+
+              {/* Camera frame — rounded like the reveal screen */}
+              <View style={styles.cameraFrame}>
+                {cameraMounted && !captured ? <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode={captureType === "photo" ? "picture" : "video"} facing={facing} /> : null}
+                {captured ? (
+                  captureType === "video" ? (
+                    <Video
+                      source={{ uri: captured.uri }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      shouldPlay
+                      isMuted={false}
+                    />
+                  ) : (
+                    <Image source={{ uri: captured.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  )
+                ) : null}
+                {referenceClipUrl && !captured ? (
+                  <View style={styles.ghostOverlay} pointerEvents="none">
+                    <Image source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    <Text style={styles.ghostLabel}>yesterday</Text>
+                  </View>
+                ) : null}
+                {!cameraMounted ? (
+                  <View style={styles.cameraBootPlaceholder}>
+                    <ActivityIndicator size="small" color={theme.colors.accent} />
+                    <Text style={styles.cameraBootText}>booting camera...</Text>
+                  </View>
+                ) : null}
+                <LinearGradient colors={["rgba(0,0,0,0.15)", "transparent", "rgba(0,0,0,0.2)"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+              </View>
+
+              <View style={[styles.bottomOverlay, { paddingBottom: safeBottom }]}>
+                {captured ? (
+                  <RecorderCaptureTray
+                    durationMs={captured.durationMs}
+                    captureType={captureType}
+                    saving={saving}
+                    recording={recording}
+                    statusMessage={statusMessage}
+                    saveErrorMessage={saveErrorMessage}
+                    onCancel={onCancel}
+                    onRetake={() => setCaptured(null)}
+                    onSave={async () => {
+                      if (!captured) return;
+                      setSaveErrorMessage(null);
+                      const result = await onSave({
+                        uri: captured.uri,
+                        durationMs: captured.durationMs,
+                        recordedAt: captured.recordedAt,
+                        recordedOn: captured.recordedOn,
+                        captureType
+                      });
+                      if (!result.success) {
+                        setSaveErrorMessage(result.errorMessage ?? "Couldn't save take.");
+                        return;
+                      }
+                      // Parent closes recorder after 500ms delay for calendar animation
+                    }}
+                  />
+                ) : (
+                  <RecorderRecordButton
+                    recording={recording}
+                    saving={saving}
+                    cameraMounted={cameraMounted}
+                    captureType={captureType}
+                    onToggle={() => {
+                      if (captureType === "video" && recording) {
+                        stopRecording();
+                      } else {
+                        void startCapture();
+                      }
+                    }}
+                  />
+                )}
+              </View>
             </View>
           )}
         </Animated.View>
@@ -268,11 +303,11 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(7,14,24,0.26)"
+    backgroundColor: "rgba(0,0,0,0.15)"
   },
   backdropFill: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(7,14,24,0.24)"
+    backgroundColor: "rgba(0,0,0,0.12)"
   },
   sheet: {
     flex: 1,
@@ -281,11 +316,26 @@ const styles = StyleSheet.create({
     marginBottom: 0,
     borderRadius: 0,
     overflow: "hidden",
-    borderWidth: 0
+    borderWidth: 0,
+    backgroundColor: "#f4efe6",
   },
   container: {
     flex: 1,
-    backgroundColor: "#07101c"
+    backgroundColor: "#f4efe6",
+  },
+  cameraFrame: {
+    flex: 1,
+    alignSelf: "stretch",
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#e8e2d8",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
   },
   cameraBootPlaceholder: {
     ...StyleSheet.absoluteFillObject,
@@ -294,17 +344,27 @@ const styles = StyleSheet.create({
     gap: 8
   },
   cameraBootText: {
-    color: "#d2e4fb",
+    color: "rgba(0,0,0,0.35)",
     fontWeight: "600",
     fontSize: 12
-  },
-  referenceOverlayMask: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(197,218,243,0.12)"
   },
   bottomOverlay: {
     marginTop: "auto",
     paddingHorizontal: 18,
-    paddingTop: 14
+    paddingTop: 14,
+    alignItems: "center",
+  },
+  ghostOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.2,
+  },
+  ghostLabel: {
+    position: "absolute",
+    bottom: 120,
+    right: 16,
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
 });

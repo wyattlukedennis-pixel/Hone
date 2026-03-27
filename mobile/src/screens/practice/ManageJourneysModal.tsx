@@ -5,7 +5,9 @@ import { theme } from "../../theme";
 import type { Clip } from "../../types/clip";
 import type { Journey } from "../../types/journey";
 import { triggerSelectionHaptic } from "../../utils/feedback";
+import { hasRevealExportPurchase } from "../../utils/purchases";
 import { getCurrentStreak, getDayCount } from "../../utils/progress";
+import { getSkillPackLabel, skillPackOptions } from "../../utils/skillPack";
 import { ActionButton } from "./ActionButton";
 import {
   PRACTICE_MODAL_BACKDROP,
@@ -29,11 +31,13 @@ type ManageJourneysModalProps = {
   newGoalText: string;
   newMilestoneLengthDays: number;
   newCaptureMode: "video" | "photo";
+  newSkillPack: "fitness" | "drawing" | "instrument";
   onTitleChange: (value: string) => void;
   onCategoryChange: (value: string) => void;
   onGoalTextChange: (value: string) => void;
   onMilestoneLengthChange: (value: number) => void;
   onCaptureModeChange: (value: "video" | "photo") => void;
+  onSkillPackChange: (value: "fitness" | "drawing" | "instrument") => void;
   onClose: () => void;
   onCreateJourney: () => void;
   onRefresh: () => void;
@@ -55,11 +59,13 @@ export function ManageJourneysModal({
   newGoalText,
   newMilestoneLengthDays,
   newCaptureMode,
+  newSkillPack,
   onTitleChange,
   onCategoryChange,
   onGoalTextChange,
   onMilestoneLengthChange,
   onCaptureModeChange,
+  onSkillPackChange,
   onClose,
   onCreateJourney,
   onRefresh,
@@ -73,7 +79,7 @@ export function ManageJourneysModal({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <GlassSurface style={styles.sheet}>
           <View style={styles.header}>
-            <Text style={styles.title}>Manage Journey</Text>
+            <Text style={styles.title}>manage journey</Text>
             <Pressable
               style={({ pressed }) => [styles.doneButton, pressed ? styles.pressed : undefined]}
               onPress={() => {
@@ -81,42 +87,47 @@ export function ManageJourneysModal({
                 onClose();
               }}
             >
-              <Text style={styles.doneText}>Done</Text>
+              <Text style={styles.doneText}>done</Text>
             </Pressable>
           </View>
-          <Text style={styles.subtitle}>Create or switch your active skill.</Text>
+          <Text style={styles.subtitle}>create or switch your active skill.</Text>
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
             <View style={styles.createCard}>
-              <Text style={styles.sectionKicker}>Create</Text>
-              <Text style={styles.sectionTitle}>Start New Journey</Text>
-              <Text style={styles.milestoneLabel}>Choose first reveal window</Text>
+              <Text style={styles.sectionKicker}>create</Text>
+              <Text style={styles.sectionTitle}>start new journey</Text>
+              <Text style={styles.milestoneLabel}>choose first reveal window</Text>
               <View style={styles.milestoneRow}>
                 {[7, 14, 30, 100].map((length) => {
                   const selected = newMilestoneLengthDays === length;
+                  const locked = length > 7 && !hasRevealExportPurchase();
                   return (
                     <Pressable
                       key={length}
                       style={({ pressed }) => [
                         styles.milestoneChip,
                         selected ? styles.milestoneChipSelected : undefined,
+                        locked ? styles.milestoneChipLocked : undefined,
                         pressed ? styles.pressed : undefined
                       ]}
                       onPress={() => {
+                        if (locked) return;
                         triggerSelectionHaptic();
                         onMilestoneLengthChange(length);
                       }}
                     >
-                      <Text style={[styles.milestoneChipText, selected ? styles.milestoneChipTextSelected : undefined]}>{length}d</Text>
+                      <Text style={[styles.milestoneChipText, selected ? styles.milestoneChipTextSelected : undefined, locked ? styles.milestoneChipTextLocked : undefined]}>
+                        {locked ? `🔒 ${length}d` : `${length}d`}
+                      </Text>
                     </Pressable>
                   );
                 })}
               </View>
-              <Text style={styles.captureModeLabel}>Capture mode</Text>
+              <Text style={styles.captureModeLabel}>capture mode</Text>
               <View style={styles.captureModeRow}>
                 {[
-                  { key: "video" as const, label: "Video" },
-                  { key: "photo" as const, label: "Photo" }
+                  { key: "video" as const, label: "video" },
+                  { key: "photo" as const, label: "photo" }
                 ].map((option) => {
                   const selected = newCaptureMode === option.key;
                   return (
@@ -137,9 +148,31 @@ export function ManageJourneysModal({
                   );
                 })}
               </View>
+              <Text style={styles.captureModeLabel}>skill pack</Text>
+              <View style={styles.captureModeRow}>
+                {skillPackOptions.map((option) => {
+                  const selected = newSkillPack === option.key;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      style={({ pressed }) => [
+                        styles.captureModeChip,
+                        selected ? styles.captureModeChipSelected : undefined,
+                        pressed ? styles.pressed : undefined
+                      ]}
+                      onPress={() => {
+                        triggerSelectionHaptic();
+                        onSkillPackChange(option.key);
+                      }}
+                    >
+                      <Text style={[styles.captureModeChipText, selected ? styles.captureModeChipTextSelected : undefined]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <TextInput
                 style={styles.input}
-                placeholder="Title (e.g., Learning Piano)"
+                placeholder="title (e.g., learning piano)"
                 value={newTitle}
                 onChangeText={onTitleChange}
                 editable={!creating}
@@ -147,7 +180,7 @@ export function ManageJourneysModal({
               />
               <TextInput
                 style={styles.input}
-                placeholder="Category (optional)"
+                placeholder="category (optional)"
                 value={newCategory}
                 onChangeText={onCategoryChange}
                 editable={!creating}
@@ -155,7 +188,7 @@ export function ManageJourneysModal({
               />
               <TextInput
                 style={[styles.input, styles.goalInput]}
-                placeholder="Goal (optional)"
+                placeholder="goal (optional)"
                 value={newGoalText}
                 onChangeText={onGoalTextChange}
                 editable={!creating}
@@ -163,8 +196,8 @@ export function ManageJourneysModal({
                 placeholderTextColor="#7b90ab"
               />
               <ActionButton
-                label="Create Journey"
-                loadingLabel="Creating..."
+                label="create journey"
+                loadingLabel="creating..."
                 variant="primary"
                 fullWidth
                 onPress={onCreateJourney}
@@ -175,13 +208,13 @@ export function ManageJourneysModal({
 
             <View style={styles.listHeader}>
               <View>
-                <Text style={styles.sectionKicker}>Switch</Text>
-                <Text style={styles.switchTitle}>Choose Active Journey</Text>
+                <Text style={styles.sectionKicker}>switch</Text>
+                <Text style={styles.switchTitle}>choose active journey</Text>
               </View>
-              <ActionButton label="Refresh" loading={refreshing} loadingLabel="Refreshing..." onPress={onRefresh} />
+              <ActionButton label="refresh" loading={refreshing} loadingLabel="refreshing..." onPress={onRefresh} />
             </View>
 
-            {journeys.length === 0 ? <Text style={styles.mutedText}>No journeys yet.</Text> : null}
+            {journeys.length === 0 ? <Text style={styles.mutedText}>no journeys yet.</Text> : null}
 
             {journeys.map((journey) => {
               const isActive = activeJourneyId === journey.id;
@@ -194,7 +227,7 @@ export function ManageJourneysModal({
                 .filter(Boolean)
                 .slice(0, 2)
                 .map((chunk) => chunk[0]?.toUpperCase() ?? "")
-                .join("") || "JR";
+                .join("") || "jr";
               return (
                 <View key={journey.id} style={[styles.row, isActive ? styles.rowActive : undefined]}>
                   <View style={[styles.rowBadge, isActive ? styles.rowBadgeActive : undefined]}>
@@ -202,9 +235,9 @@ export function ManageJourneysModal({
                   </View>
 
                   <View style={styles.rowBody}>
-                    <Text style={styles.rowTitle}>{journey.title}</Text>
+                    <Text style={styles.rowTitle}>{journey.title.toLowerCase()}</Text>
                     <Text style={styles.rowMeta}>
-                      Day {Math.max(dayCount, 1)} • {streak}d streak
+                      {getSkillPackLabel(journey.skillPack).toLowerCase()} • day {Math.max(dayCount, 1)} • {streak}-day streak
                     </Text>
 
                     <View style={styles.rowActions}>
@@ -222,7 +255,7 @@ export function ManageJourneysModal({
                         disabled={isActive || isBusy}
                       >
                         <Text style={[styles.actionLabel, isActive ? styles.actionLabelActive : undefined]}>
-                          {isActive ? "Active" : "Set active"}
+                          {isActive ? "active" : "set active"}
                         </Text>
                       </Pressable>
 
@@ -234,7 +267,7 @@ export function ManageJourneysModal({
                         }}
                         disabled={isBusy}
                       >
-                        <Text style={styles.actionLabelPrimary}>Record</Text>
+                        <Text style={styles.actionLabelPrimary}>record</Text>
                       </Pressable>
 
                       <Pressable
@@ -245,7 +278,7 @@ export function ManageJourneysModal({
                         }}
                         disabled={isBusy}
                       >
-                        <Text style={styles.actionLabelDanger}>{isBusy ? "Closing..." : "Close"}</Text>
+                        <Text style={styles.actionLabelDanger}>{isBusy ? "closing..." : "close"}</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -290,8 +323,7 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: "700",
     fontSize: 12,
-    textTransform: "uppercase",
-    letterSpacing: 0.55
+    letterSpacing: 0.15
   },
   doneButton: {
     borderRadius: 999,
@@ -320,8 +352,7 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: "700",
     fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 0.5
+    letterSpacing: 0.15
   },
   sectionTitle: {
     marginTop: 2,
@@ -334,8 +365,7 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontSize: 12,
     fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.45
+    letterSpacing: 0.15
   },
   milestoneRow: {
     marginTop: 8,
@@ -362,21 +392,25 @@ const styles = StyleSheet.create({
   milestoneChipTextSelected: {
     color: theme.colors.accentStrong
   },
+  milestoneChipLocked: {
+    opacity: 0.4,
+  },
+  milestoneChipTextLocked: {
+    color: "rgba(0,0,0,0.25)",
+  },
   captureModeLabel: {
     marginTop: 10,
     color: theme.colors.textSecondary,
     fontSize: 12,
     fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.45
+    letterSpacing: 0.15
   },
   captureRuleLabel: {
     marginTop: 10,
     color: theme.colors.textSecondary,
     fontSize: 12,
     fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.45
+    letterSpacing: 0.15
   },
   captureModeRow: {
     marginTop: 8,

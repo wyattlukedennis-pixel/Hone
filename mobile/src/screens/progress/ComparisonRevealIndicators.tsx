@@ -1,5 +1,7 @@
 import { StyleSheet, View } from "react-native";
 
+import { theme } from "../../theme";
+
 type ComparisonRevealIndicatorsProps = {
   keys: string[];
   activeIndex: number;
@@ -24,14 +26,17 @@ const styles = StyleSheet.create({
     gap: 7
   },
   indicatorDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.3)"
+    width: 8,
+    height: 8,
+    borderRadius: 0,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)"
   },
   indicatorDotActive: {
-    width: 26,
-    borderRadius: 999,
-    backgroundColor: "#0d63ff"
+    width: 28,
+    borderRadius: 0,
+    backgroundColor: theme.colors.accent,
+    borderColor: "#ffffff"
   }
 });

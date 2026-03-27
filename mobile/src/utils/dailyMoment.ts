@@ -16,7 +16,7 @@ export function formatDailyMomentTime(settings: DailyMomentSettings) {
   return date.toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit"
-  });
+  }).toLowerCase();
 }
 
 export function getDailyMomentWindow(now: Date, settings: DailyMomentSettings): DailyWindow {

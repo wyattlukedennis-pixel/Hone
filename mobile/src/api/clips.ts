@@ -113,7 +113,7 @@ export async function uploadClipFile(params: {
 export function createClip(
   token: string,
   journeyId: string,
-  payload: { uploadId: string; durationMs: number; recordedAt: string; captureType?: "video" | "photo" }
+  payload: { uploadId: string; durationMs: number; recordedAt: string; recordedOn: string; captureType?: "video" | "photo" }
 ) {
   return requestJson<ClipResponse>(`/journeys/${journeyId}/clips`, {
     token,

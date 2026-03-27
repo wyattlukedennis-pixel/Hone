@@ -37,6 +37,7 @@ type CreateClipBody = {
   uploadId?: string;
   durationMs?: number;
   recordedAt?: string;
+  recordedOn?: string;
 };
 
 function sanitizeExtension(input: string) {
@@ -56,6 +57,14 @@ function normalizeCaptureType(value: unknown) {
 function getBaseUrl(protocol: string, host: string | undefined) {
   const resolvedHost = host ?? "localhost:4000";
   return `${protocol}://${resolvedHost}`;
+}
+
+function normalizeRecordedOn(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  return normalized;
 }
 
 export function registerClipRoutes(app: FastifyInstance) {
@@ -167,7 +176,11 @@ export function registerClipRoutes(app: FastifyInstance) {
     if (Number.isNaN(recordedAt.getTime())) {
       return reply.code(400).send({ error: "INVALID_RECORDED_AT" });
     }
-    const recordedOn = recordedAt.toISOString().slice(0, 10);
+    const normalizedRecordedOn = normalizeRecordedOn(request.body?.recordedOn);
+    if (request.body?.recordedOn !== undefined && !normalizedRecordedOn) {
+      return reply.code(400).send({ error: "INVALID_RECORDED_ON" });
+    }
+    const recordedOn = normalizedRecordedOn ?? recordedAt.toISOString().slice(0, 10);
 
     const baseUrl = getBaseUrl(request.protocol, request.headers.host);
     const clip = await upsertClipFromUpload(pool, {
@@ -209,6 +222,13 @@ export function registerClipRoutes(app: FastifyInstance) {
     if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
 
     const deletedCount = await deleteClipsForJourney(pool, journey.id);
+
+    // Reset milestone progress back to chapter 1 when all clips are cleared (dev tools)
+    await pool.query(
+      `UPDATE journeys SET milestone_chapter = 1, milestone_start_day = 1, milestone_started_on = CURRENT_DATE WHERE id = $1`,
+      [journey.id]
+    );
+
     return reply.send({ success: true, deletedCount });
   });
 }

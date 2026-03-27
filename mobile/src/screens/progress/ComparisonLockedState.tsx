@@ -27,11 +27,11 @@ export function ComparisonLockedState({ hero = false, message }: ComparisonLocke
 const styles = StyleSheet.create({
   unlockBox: {
     marginTop: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.66)",
-    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    borderRadius: theme.shape.cardRadiusMd,
     padding: 15,
-    backgroundColor: "rgba(255,255,255,0.2)"
+    backgroundColor: "rgba(241,233,221,0.94)"
   },
   unlockBoxHero: {
     marginTop: 14
@@ -39,7 +39,10 @@ const styles = StyleSheet.create({
   unlockTitle: {
     color: theme.colors.textPrimary,
     fontWeight: "800",
-    fontSize: 16
+    fontSize: 16,
+    textTransform: "uppercase",
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
   },
   lockedTeaserRow: {
     marginTop: 10,
@@ -49,10 +52,10 @@ const styles = StyleSheet.create({
   lockedTeaserPane: {
     flex: 1,
     height: 110,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     alignItems: "center",
     justifyContent: "center"
   },
@@ -63,7 +66,8 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 0.6
+    letterSpacing: 0.9,
+    fontFamily: theme.typography.label
   },
   unlockText: {
     marginTop: 10,

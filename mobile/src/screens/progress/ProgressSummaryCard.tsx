@@ -51,19 +51,24 @@ export function ProgressSummaryCard({ journeyTitle, didPracticeToday, dayCount, 
 const styles = StyleSheet.create({
   summaryCard: {
     marginTop: 14,
-    borderRadius: 22,
+    borderRadius: theme.shape.cardRadiusLg,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     padding: 16
   },
   summaryJourney: {
     color: theme.colors.textPrimary,
     fontSize: 28,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   summaryCopy: {
     marginTop: 8,
     color: theme.colors.textSecondary,
     fontSize: 18,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: theme.typography.body
   },
   summaryStats: {
     marginTop: 12,
@@ -72,17 +77,20 @@ const styles = StyleSheet.create({
   },
   summaryStat: {
     flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.66)",
-    backgroundColor: "rgba(255,255,255,0.24)",
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)",
     paddingVertical: 8,
     paddingHorizontal: 10
   },
   summaryStatLabel: {
     color: theme.colors.textSecondary,
-    fontSize: 12,
-    fontWeight: "700"
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
   },
   summaryStatValue: {
     marginTop: 4,

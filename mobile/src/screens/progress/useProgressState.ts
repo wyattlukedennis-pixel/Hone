@@ -10,7 +10,8 @@ import type { Journey, JourneyReveal } from "../../types/journey";
 import { theme } from "../../theme";
 import { useReducedMotion } from "../../utils/useReducedMotion";
 import {
-  buildChapterComparisonPair,
+  buildChapterComparisonPlan,
+  buildProtocolConsistencyTrend,
   buildPracticeHeatmap,
   getChapterDayCount,
   getChapterStreak,
@@ -22,7 +23,7 @@ import {
 export type ComparisonPreset = "day1" | "week" | "month";
 
 export const comparisonPresetOptions: Array<{ key: ComparisonPreset; label: string; chipLabel: string }> = [
-  { key: "day1", label: "Milestone Reveal", chipLabel: "Reveal" }
+  { key: "day1", label: "Chapter Reveal", chipLabel: "Reveal" }
 ];
 
 type UseProgressStateParams = {
@@ -36,7 +37,7 @@ type UseProgressStateParams = {
 
 function toProgressErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : "Unexpected error";
-  if (raw === "UNAUTHORIZED") return "Session expired. Please login again.";
+  if (raw === "UNAUTHORIZED") return "Session expired. Please log in again.";
   if (raw === "BACKEND_MIGRATION_REQUIRED") return "Backend schema is outdated. Restart backend and run migrations.";
   if (raw === "Internal Server Error") return "Backend error. Check backend logs and restart the API.";
   if (raw.startsWith("Network request failed")) return raw;
@@ -113,6 +114,7 @@ export function useProgressState({
         return;
       }
 
+      console.log("[useProgressState] Re-fetching clips, recordingsRevision:", recordingsRevision);
       setClipsLoading(true);
       setErrorMessage(null);
       try {
@@ -152,6 +154,7 @@ export function useProgressState({
     () => (activeJourneyId ? modeJourneys.find((journey) => journey.id === activeJourneyId) ?? null : null),
     [modeJourneys, activeJourneyId]
   );
+
   const effectiveNow = useMemo(() => {
     if (!devNowDayOffset) return new Date();
     const value = new Date();
@@ -175,23 +178,29 @@ export function useProgressState({
         : null,
     [selectedJourney?.id, selectedJourney?.milestoneLengthDays, selectedJourney?.milestoneStartDay, selectedJourney?.milestoneChapter, dayCount]
   );
-  const comparison = useMemo(() => {
-    if (!selectedJourney || !milestoneProgress?.reachedReveal) return null;
-    return buildChapterComparisonPair(revealTrackClips, {
+  const comparisonPlan = useMemo(() => {
+    if (!selectedJourney) return null;
+    return buildChapterComparisonPlan(revealTrackClips, {
       milestoneLengthDays: selectedJourney.milestoneLengthDays,
       milestoneStartDay: selectedJourney.milestoneStartDay,
       milestoneChapter: selectedJourney.milestoneChapter
     });
-  }, [
-    revealTrackClips,
-    selectedJourney?.id,
-    selectedJourney?.milestoneLengthDays,
-    selectedJourney?.milestoneStartDay,
-    selectedJourney?.milestoneChapter,
-    milestoneProgress?.reachedReveal
-  ]);
+  }, [revealTrackClips, selectedJourney?.id, selectedJourney?.milestoneLengthDays, selectedJourney?.milestoneStartDay, selectedJourney?.milestoneChapter]);
+  const comparison = comparisonPlan?.comparison ?? null;
   const streak = chapterRule ? getChapterStreak(clips, chapterRule, effectiveNow) : 0;
   const didPracticeToday = chapterRule ? hasChapterClipToday(clips, chapterRule, effectiveNow) : false;
+  const protocolConsistency = useMemo(
+    () =>
+      selectedJourney
+        ? buildProtocolConsistencyTrend({
+            clips: revealTrackClips,
+            captureMode: selectedJourney.captureMode,
+            skillPack: selectedJourney.skillPack,
+            now: effectiveNow
+          })
+        : null,
+    [selectedJourney?.id, selectedJourney?.captureMode, selectedJourney?.skillPack, revealTrackClips, effectiveNow]
+  );
 
   const heatmapCells = useMemo(() => buildPracticeHeatmap(clips, 8, effectiveNow), [clips, effectiveNow]);
 
@@ -254,9 +263,11 @@ export function useProgressState({
       journeyId: selectedJourney.id,
       preset,
       thenClipId: comparison.thenClip.id,
-      nowClipId: comparison.nowClip.id
+      nowClipId: comparison.nowClip.id,
+      strategy: comparisonPlan?.strategyLabel ?? null,
+      consistencyScore: comparisonPlan?.consistencyScore ?? null
     });
-  }, [compareModalOpen, comparison?.thenClip.id, comparison?.nowClip.id, preset, selectedJourney?.id]);
+  }, [compareModalOpen, comparison?.thenClip.id, comparison?.nowClip.id, preset, selectedJourney?.id, comparisonPlan?.strategyLabel, comparisonPlan?.consistencyScore]);
 
   useEffect(() => {
     if (!compareModalOpen) return;
@@ -360,17 +371,17 @@ export function useProgressState({
     ]).start();
   }, [selectedJourney?.id, compareCardReveal, nextUnlockReveal]);
 
-  let emptyComparisonMessage = "Choose a journey to view progress.";
+  let emptyComparisonMessage = "Choose a journey to open progress.";
   if (selectedJourney && !milestoneProgress) {
-    emptyComparisonMessage = "Milestone data is loading.";
+    emptyComparisonMessage = "Chapter data is loading.";
   } else if (selectedJourney && milestoneProgress?.reachedReveal) {
     if (revealTrackClips.length < 2) {
       emptyComparisonMessage = `Add at least two ${selectedJourney.captureMode} clips to open this reveal.`;
     } else {
-      emptyComparisonMessage = "Reveal is almost ready.";
+      emptyComparisonMessage = "Reveal is almost live.";
     }
   } else if (milestoneProgress) {
-    emptyComparisonMessage = `${milestoneProgress.remainingDays} ${milestoneProgress.remainingDays === 1 ? "practice" : "practices"} until your reveal.`;
+    emptyComparisonMessage = `${milestoneProgress.remainingDays} ${milestoneProgress.remainingDays === 1 ? "take" : "takes"} to your reveal.`;
   }
 
   return {
@@ -397,9 +408,12 @@ export function useProgressState({
     selectedJourney,
     milestoneProgress,
     comparison,
+    comparisonPlan,
+    revealTrackClips,
     dayCount,
     streak,
     didPracticeToday,
+    protocolConsistency,
     heatmapCells,
     milestones,
     nextMilestone,

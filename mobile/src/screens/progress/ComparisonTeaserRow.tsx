@@ -58,18 +58,21 @@ const styles = StyleSheet.create({
   },
   compareTeaserLabel: {
     color: theme.colors.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 0.5
+    letterSpacing: 0.9,
+    fontFamily: theme.typography.label
   },
   compareTeaserVideo: {
     marginTop: 6,
     width: "100%",
     aspectRatio: 3 / 4,
-    borderRadius: 14,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 2,
+    borderColor: "#ffffff",
     overflow: "hidden",
-    backgroundColor: "#0d2740"
+    backgroundColor: "#121212"
   },
   compareTeaserVideoHero: {
     aspectRatio: 9 / 15

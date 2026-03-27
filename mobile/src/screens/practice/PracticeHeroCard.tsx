@@ -1,4 +1,5 @@
 import { Animated, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { theme } from "../../theme";
 import { ActionButton } from "./ActionButton";
@@ -39,7 +40,12 @@ export function PracticeHeroCard({
   onRecord
 }: PracticeHeroCardProps) {
   return (
-    <View style={styles.heroCard}>
+    <LinearGradient
+      colors={["#172a44", "#14233b", "#0f1c31"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.heroCard}
+    >
       <Text style={styles.heroOverline}>Active Skill</Text>
       <Text style={styles.heroTitle}>{title}</Text>
       <Animated.View style={{ transform: [{ scale: statPulse }] }}>
@@ -76,7 +82,7 @@ export function PracticeHeroCard({
           <Text style={styles.milestoneHint}>All current milestones unlocked. Keep showing up.</Text>
         )}
       </Animated.View>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -84,82 +90,89 @@ const styles = StyleSheet.create({
   heroCard: {
     marginTop: 18,
     borderRadius: 28,
-    backgroundColor: "rgba(252,255,255,0.86)",
+    backgroundColor: "#14243b",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.86)",
+    borderColor: "rgba(151,194,247,0.38)",
     padding: 18,
-    shadowColor: "#113761",
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 7
+    shadowColor: "#091a31",
+    shadowOpacity: 0.32,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 11
   },
   heroOverline: {
     fontSize: 11,
     textTransform: "uppercase",
-    letterSpacing: 0.7,
+    letterSpacing: 0.9,
     fontWeight: "800",
-    color: theme.colors.textSecondary
+    color: "#8ea7c8",
+    fontFamily: theme.typography.heading
   },
   heroTitle: {
     marginTop: 4,
-    fontSize: 31,
-    lineHeight: 35,
+    fontSize: 32,
+    lineHeight: 36,
     fontWeight: "800",
-    color: theme.colors.textPrimary
+    color: "#f0f7ff",
+    fontFamily: theme.typography.display
   },
   heroSubtitle: {
     marginTop: 6,
     fontSize: 16,
     lineHeight: 21,
-    color: theme.colors.textSecondary,
-    fontWeight: "700"
+    color: "#c1d5ef",
+    fontWeight: "700",
+    fontFamily: theme.typography.body
   },
   heroDayline: {
     marginTop: 4,
-    color: theme.colors.accentStrong,
+    color: "#6cc7ff",
     fontSize: 18,
     lineHeight: 22,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
   },
   identityPill: {
     marginTop: 7,
     alignSelf: "flex-start",
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.42)",
-    backgroundColor: "rgba(14,99,255,0.12)",
+    borderColor: "rgba(117,198,255,0.56)",
+    backgroundColor: "rgba(18,102,178,0.35)",
     paddingHorizontal: 10,
     paddingVertical: 5
   },
   identityText: {
-    color: theme.colors.accentStrong,
+    color: "#def2ff",
     fontSize: 12,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
   },
   todayPrompt: {
     marginTop: 10,
     fontSize: 14,
     lineHeight: 19,
-    color: theme.colors.textSecondary,
-    fontWeight: "600"
+    color: "#b4cae7",
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   milestoneHintWrap: {
     marginTop: 8,
     borderRadius: 12,
     paddingVertical: 7,
     paddingHorizontal: 10,
-    backgroundColor: "rgba(255,255,255,0.34)"
+    backgroundColor: "rgba(255,255,255,0.08)"
   },
   milestoneHintWrapActive: {
-    backgroundColor: "rgba(13,159,101,0.17)",
+    backgroundColor: "rgba(20,163,115,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(13,159,101,0.35)"
+    borderColor: "rgba(104,210,160,0.38)"
   },
   milestoneHint: {
-    color: theme.colors.textSecondary,
+    color: "#b4cae7",
     fontWeight: "600",
     fontSize: 13,
-    lineHeight: 17
+    lineHeight: 17,
+    fontFamily: theme.typography.body
   }
 });

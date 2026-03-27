@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import type { ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ResizeMode } from "expo-av";
 import LottieView from "lottie-react-native";
 
+import { trackEvent } from "../../analytics/events";
+import { LogoMorphLoader } from "../../components/LogoMorphLoader";
 import { LoopingVideoPlayer } from "../../components/LoopingVideoPlayer";
+import { PaywallModal } from "../../components/PaywallModal";
+import { ProofReceiptModal } from "../../components/ProofReceiptModal";
 import { TactilePressable } from "../../components/TactilePressable";
+import { readQuickShareCap, writeQuickShareCap } from "../../storage/revealShareNudgeStorage";
 import { theme } from "../../theme";
 import type { Clip } from "../../types/clip";
 import { triggerMilestoneHaptic, triggerSelectionHaptic } from "../../utils/feedback";
+import type { ChapterTrailerMoment } from "../../utils/progress";
+import { exportAndSaveReel, exportAndShareReel, prepareReelAsset, resolveReelUri } from "../../utils/reelExport";
+import { hasRevealExportPurchase } from "../../utils/purchases";
 import { useReducedMotion } from "../../utils/useReducedMotion";
 import { ComparisonRevealHeader } from "./ComparisonRevealHeader";
-import { ComparisonRevealIndicators } from "./ComparisonRevealIndicators";
-import { ComparisonRevealPager } from "./ComparisonRevealPager";
+import ReelPreviewScreen from "./ReelPreviewScreen";
+import { ThenNowCompareStage } from "./ThenNowCompareStage";
 
 type ComparisonRevealModalProps = {
   visible: boolean;
@@ -24,7 +31,9 @@ type ComparisonRevealModalProps = {
     nowLabel: string;
   } | null;
   presetLabel: string;
+  token: string;
   chapterNumber: number;
+  journeyId?: string | null;
   milestoneLengthDays: number;
   progressDays: number;
   currentStreak: number;
@@ -40,13 +49,24 @@ type ComparisonRevealModalProps = {
     width: number;
     height: number;
   } | null;
+  pairStrategyLabel?: string | null;
+  pairReason?: string | null;
+  pairConsistencyScore?: number | null;
+  trailerMoments?: ChapterTrailerMoment[] | null;
+  storylineHeadline?: string | null;
+  storylineCaption?: string | null;
+  storylineReflection?: string | null;
+  entryStage?: "unlock" | "compare" | "reel";
   nextChapterBusyLength?: number | null;
   chapterActionMessage?: string | null;
+  goalText?: string | null;
   onStartNextChapter?: (days: number) => void;
   onClose: () => void;
 };
 
 type RevealStage = "unlock" | "opening" | "compare" | "reel" | "summary" | "next_chapter";
+type ReelPrepareStatus = "idle" | "preparing" | "ready" | "failed";
+type SummaryNudgeState = "prompt_both" | "prompt_save" | "prompt_share" | "complete";
 const nextMilestoneOptions = [7, 14, 30, 100] as const;
 const revealEasing = {
   outHero: Easing.bezier(0.16, 1, 0.3, 1),
@@ -61,24 +81,24 @@ const nextMilestoneCardContent: Record<
   { title: string; subtitle: string; payoff: string }
 > = {
   7: {
-    title: "7-Day Chapter",
-    subtitle: "Quick rhythm reset",
-    payoff: "Fast reveal loop. Great for staying consistent day to day."
+    title: "7-day chapter",
+    subtitle: "fast momentum loop",
+    payoff: "quick reveal pace to lock consistency."
   },
   14: {
-    title: "14-Day Chapter",
-    subtitle: "Momentum chapter",
-    payoff: "More visible change while still keeping feedback frequent."
+    title: "14-day chapter",
+    subtitle: "momentum chapter",
+    payoff: "more visible change while keeping feedback tight."
   },
   30: {
-    title: "30-Day Chapter",
-    subtitle: "Core growth block",
-    payoff: "Best balance of consistency and meaningful transformation."
+    title: "30-day chapter",
+    subtitle: "core growth block",
+    payoff: "strong balance of consistency and clear transformation."
   },
   100: {
-    title: "100-Day Chapter",
-    subtitle: "Commitment chapter",
-    payoff: "Long-arc progress story for serious practitioners."
+    title: "100-day chapter",
+    subtitle: "commitment chapter",
+    payoff: "long-arc story for serious practitioners."
   }
 };
 
@@ -94,7 +114,7 @@ function getRecommendedNextMilestoneLength(params: {
   // Keep first completion easy so users get another quick win.
   if (chapterNumber <= 1 && totalPracticeDays < 7) return 7;
 
-  // Very established users can opt into deeper chapter cadence.
+  // Very established users can opt into deeper chapter scope.
   if ((totalPracticeDays >= 120 && currentStreak >= 30) || milestoneLengthDays >= 100) return 100;
 
   // Core recommendation for consistent users.
@@ -114,28 +134,30 @@ function getRecommendedNextMilestoneReason(params: {
   const { recommendedDays, totalPracticeDays, currentStreak } = params;
 
   if (recommendedDays === 100) {
-    return `You are showing serious consistency. A 100-day chapter fits your rhythm.`;
+    return `you are showing serious consistency. a 100-day chapter fits your rhythm.`;
   }
 
   if (recommendedDays === 30) {
     if (totalPracticeDays >= 30) {
-      return `You have built real momentum. A 30-day chapter will show meaningful growth.`;
+      return `you have built real momentum. a 30-day chapter will show meaningful growth.`;
     }
-    return `Your ${currentStreak}-day streak is strong. A 30-day chapter keeps that momentum going.`;
+    return `your ${currentStreak}-day streak is strong. a 30-day chapter keeps that momentum going.`;
   }
 
   if (recommendedDays === 14) {
-    return "Great pacing. A 14-day chapter keeps progress visible without slowing you down.";
+    return "great pacing. a 14-day chapter keeps progress visible without losing speed.";
   }
 
-  return "Start with a quick 7-day chapter to keep the streak alive and earn your next reveal fast.";
+  return "start with a 7-day chapter to protect momentum and earn your next reveal fast.";
 }
 
 export function ComparisonRevealModal({
   visible,
   comparison,
   presetLabel,
+  token,
   chapterNumber,
+  journeyId = null,
   milestoneLengthDays,
   progressDays,
   currentStreak,
@@ -146,22 +168,44 @@ export function ComparisonRevealModal({
   nowPanelReveal,
   labelsReveal,
   sourceRect,
+  pairStrategyLabel: _pairStrategyLabel = null,
+  pairReason: _pairReason = null,
+  pairConsistencyScore: _pairConsistencyScore = null,
+  trailerMoments = null,
+  storylineHeadline = null,
+  storylineCaption = null,
+  storylineReflection = null,
+  entryStage = "unlock",
   nextChapterBusyLength = null,
   chapterActionMessage = null,
+  goalText = null,
   onStartNextChapter,
   onClose
 }: ComparisonRevealModalProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
-  const scrollRef = useRef<ScrollView | null>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [compareFocus, setCompareFocus] = useState<"then" | "now">("now");
   const [stage, setStage] = useState<RevealStage>("unlock");
   const [closing, setClosing] = useState(false);
   const [capsuleOpening, setCapsuleOpening] = useState(false);
   const [reelPlaying, setReelPlaying] = useState(true);
   const [reelIndex, setReelIndex] = useState(0);
   const [reelExportMessage, setReelExportMessage] = useState<string | null>(null);
+  const [reelExporting, setReelExporting] = useState(false);
+  const [reelSaving, setReelSaving] = useState(false);
+  const [reelReady, setReelReady] = useState(false);
+  const [reelPrepareStatus, setReelPrepareStatus] = useState<ReelPrepareStatus>("idle");
+  const [reelShared, setReelShared] = useState(false);
+  const [receiptVisible, setReceiptVisible] = useState(false);
+  const [receiptPaywallVisible, setReceiptPaywallVisible] = useState(false);
+  const [reelSaved, setReelSaved] = useState(false);
+  const [quickShareDismissed, setQuickShareDismissed] = useState(false);
+  const [quickShareCapLoaded, setQuickShareCapLoaded] = useState(false);
+  const [quickShareCapReached, setQuickShareCapReached] = useState(false);
+  const [reelPreviewVisible, setReelPreviewVisible] = useState(false);
+  const [composedDaySpan, setComposedDaySpan] = useState(0);
+  const [composing, setComposing] = useState(false);
   const stageReveal = useRef(new Animated.Value(0)).current;
   const unlockPulse = useRef(new Animated.Value(1)).current;
   const presentOpen = useRef(new Animated.Value(0)).current;
@@ -170,40 +214,40 @@ export function ComparisonRevealModal({
   const summaryMetricsReveal = useRef(new Animated.Value(0)).current;
   const summaryActionsReveal = useRef(new Animated.Value(0)).current;
   const compareEntryVeil = useRef(new Animated.Value(0)).current;
-  const floatingDoneOpacity = useRef(new Animated.Value(0)).current;
   const reelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const openingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const floatingDoneHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stageViewKeyRef = useRef<string | null>(null);
+  const summaryNudgeKeyRef = useRef<string | null>(null);
+  const quickShareImpressionKeyRef = useRef<string | null>(null);
+  const quickShareSuppressedKeyRef = useRef<string | null>(null);
   const openingFinishedRef = useRef(false);
-  const [floatingDoneHitArea, setFloatingDoneHitArea] = useState(false);
   const duration = (ms: number) => (reducedMotion ? 0 : ms);
-  const revealCadence = chapterNumber <= 1 ? 1.18 : 0.94;
-  const cadenceDuration = (ms: number) => duration(Math.round(ms * revealCadence));
+  const revealPace = chapterNumber <= 1 ? 1.18 : 0.94;
+  const pacedDuration = (ms: number) => duration(Math.round(ms * revealPace));
   const motionDurations = {
-    enter: cadenceDuration(640),
-    openingEnter: cadenceDuration(1180),
-    stageOut: cadenceDuration(260),
-    stageIn: cadenceDuration(540),
-    closePanels: cadenceDuration(240),
-    closeShell: cadenceDuration(560),
-    backdrop: cadenceDuration(620),
-    pulse: cadenceDuration(420),
-    capsuleOpen: cadenceDuration(1220),
-    drift: cadenceDuration(760)
-  };
-  const controlTimings = {
-    showDuration: cadenceDuration(260),
-    hideDuration: cadenceDuration(380),
-    autoHideDefault: 2200,
-    autoHideAfterInteraction: 1700,
-    autoHideOnStageEnter: 2800
+    enter: pacedDuration(640),
+    openingEnter: pacedDuration(1180),
+    stageOut: pacedDuration(260),
+    stageIn: pacedDuration(540),
+    closePanels: pacedDuration(240),
+    closeShell: pacedDuration(560),
+    backdrop: pacedDuration(620),
+    pulse: pacedDuration(420),
+    capsuleOpen: pacedDuration(1220),
+    drift: pacedDuration(760)
   };
 
-  const cardWidth = width;
   const safeHeight = Math.max(560, height - insets.top - insets.bottom);
-  const videoHeight = Math.max(420, Math.min(safeHeight - 110, safeHeight * 0.9));
+  const compareVideoHeight = Math.max(320, Math.min(safeHeight - 280, safeHeight * 0.68));
   const reelVideoHeight = Math.max(320, Math.min(safeHeight - 260, safeHeight * 0.68));
   const summaryHeroHeight = Math.max(220, Math.min(safeHeight * 0.4, 340));
+  const compareActionsStacked = width < 415;
+  const compareDockHorizontalPadding = width >= 430 ? 32 : width >= 390 ? 24 : 20;
+  const comparePairGap = width >= 430 ? 18 : 14;
+  const comparePrimaryGap = compareActionsStacked ? 14 : width >= 430 ? 24 : 20;
+  const compareOverlayTopInset = width >= 430 ? 18 : 14;
+  const compareOverlaySideInset = width >= 430 ? 22 : width >= 390 ? 18 : 14;
+  const compareOverlayBottomInset = width >= 430 ? 14 : 12;
   const startScaleX = sourceRect ? Math.max(0.34, sourceRect.width / width) : 0.975;
   const startScaleY = sourceRect ? Math.max(0.22, sourceRect.height / height) : 0.975;
   const startTranslateX = sourceRect ? sourceRect.x - ((1 - startScaleX) * width) / 2 : 0;
@@ -214,13 +258,13 @@ export function ComparisonRevealModal({
         ? [
             {
               key: "then",
-              badge: "Then",
+              badge: "before",
               title: comparison.thenLabel,
               clip: comparison.thenClip
             },
             {
               key: "now",
-              badge: "Now",
+              badge: "now",
               title: comparison.nowLabel,
               clip: comparison.nowClip
             }
@@ -228,18 +272,153 @@ export function ComparisonRevealModal({
         : [],
     [comparison]
   );
+  const reelCards = useMemo(() => {
+    if (trailerMoments && trailerMoments.length >= 2) {
+      return trailerMoments.map((moment, index) => ({
+        key: `trailer-${moment.clip.id}-${index}`,
+        badge: moment.label,
+        title: moment.label,
+        clip: moment.clip
+      }));
+    }
+    return cards;
+  }, [trailerMoments, cards]);
+  const reelMomentsLabel = `${reelCards.length} ${reelCards.length === 1 ? "moment" : "moments"}`;
+  const chapterProgressLabel = `${Math.min(progressDays, milestoneLengthDays)} / ${milestoneLengthDays} days`;
+  const reelStatsLabel =
+    currentStreak > 0 ? `chapter ${chapterNumber} • ${chapterProgressLabel} • ${currentStreak}-day streak` : `chapter ${chapterNumber} • ${chapterProgressLabel}`;
 
-  const summaryClip = comparison?.nowClip ?? cards[cards.length - 1]?.clip ?? null;
+  const summaryClip = comparison?.nowClip ?? reelCards[reelCards.length - 1]?.clip ?? cards[cards.length - 1]?.clip ?? null;
+  const reelExportInput = useMemo(
+    () => ({
+      chapterNumber,
+      trailerMoments,
+      sourceClips: reelCards.map((entry) => entry.clip),
+      fallbackClip: summaryClip,
+      milestoneLengthDays,
+      progressDays,
+      currentStreak,
+      storylineHeadline,
+      storylineCaption,
+      storylineReflection,
+      token,
+      journeyId
+    }),
+    [
+      chapterNumber,
+      trailerMoments,
+      reelCards,
+      summaryClip,
+      milestoneLengthDays,
+      progressDays,
+      currentStreak,
+      storylineHeadline,
+      storylineCaption,
+      storylineReflection,
+      token,
+      journeyId
+    ]
+  );
+  const compareExportInput = useMemo(
+    () => ({
+      chapterNumber,
+      trailerMoments: comparison
+        ? [
+            { clip: comparison.thenClip, label: "THEN" },
+            { clip: comparison.nowClip, label: "NOW" }
+          ]
+        : trailerMoments,
+      sourceClips: comparison ? [comparison.thenClip, comparison.nowClip] : reelCards.map((entry) => entry.clip),
+      fallbackClip: comparison?.nowClip ?? summaryClip,
+      milestoneLengthDays,
+      progressDays,
+      currentStreak,
+      storylineHeadline: storylineHeadline ?? `chapter ${chapterNumber} compare`,
+      storylineCaption: storylineCaption ?? "then vs now snapshot",
+      storylineReflection: storylineReflection ?? "visible progress from early reps to current form.",
+      token,
+      journeyId
+    }),
+    [
+      chapterNumber,
+      comparison,
+      trailerMoments,
+      reelCards,
+      summaryClip,
+      milestoneLengthDays,
+      progressDays,
+      currentStreak,
+      storylineHeadline,
+      storylineCaption,
+      storylineReflection,
+      token,
+      journeyId
+    ]
+  );
+  const summaryReadyLabel =
+    reelPrepareStatus === "ready"
+      ? "reel ready."
+      : reelPrepareStatus === "failed"
+        ? "reel prep failed. retry or export directly."
+        : "preparing reel...";
+  const summaryNudgeState: SummaryNudgeState = reelShared ? (reelSaved ? "complete" : "prompt_save") : reelSaved ? "prompt_share" : "prompt_both";
+  const summaryNudgeCopy =
+    summaryNudgeState === "complete"
+      ? "reel shared and saved."
+      : summaryNudgeState === "prompt_save"
+        ? "great share. save a copy to your library."
+        : summaryNudgeState === "prompt_share"
+          ? "nice save. share your progress with someone."
+          : "share or save this reel to lock in the chapter win.";
+  const showQuickShareCta =
+    quickShareCapLoaded && !quickShareCapReached && reelPrepareStatus === "ready" && !reelShared && !quickShareDismissed;
+  const shareButtonLabel = reelExporting ? "preparing..." : reelShared ? "share again" : "share reel";
+  const saveButtonLabel = reelSaving ? "saving..." : reelSaved ? "saved to library" : "save reel";
+  const compareSaveLabel = reelSaving ? "saving..." : reelSaved ? "saved snapshot" : "save snapshot";
+  const analyticsBase = useMemo(
+    () => ({
+      journeyId,
+      chapterNumber,
+      milestoneLengthDays,
+      progressDays,
+      currentStreak,
+      totalPracticeDays,
+      entryStage,
+      presetLabel,
+      trailerMomentCount: trailerMoments?.length ?? 0
+    }),
+    [
+      journeyId,
+      chapterNumber,
+      milestoneLengthDays,
+      progressDays,
+      currentStreak,
+      totalPracticeDays,
+      entryStage,
+      presetLabel,
+      trailerMoments
+    ]
+  );
 
   useEffect(() => {
     if (!visible) return;
-    setActiveIndex(0);
-    setStage("unlock");
+    setCompareFocus("now");
+    setStage(entryStage === "unlock" ? "unlock" : entryStage === "reel" ? "reel" : "compare");
     setClosing(false);
     setCapsuleOpening(false);
     setReelPlaying(true);
     setReelIndex(0);
     setReelExportMessage(null);
+    setReelExporting(false);
+    setReelSaving(false);
+    setReelReady(false);
+    setReelPrepareStatus("idle");
+    setReelShared(false);
+    setReelSaved(false);
+    setQuickShareDismissed(false);
+    setQuickShareCapLoaded(false);
+    setQuickShareCapReached(false);
+    setReelPreviewVisible(false);
     openingFinishedRef.current = false;
     if (openingTimerRef.current) {
       clearTimeout(openingTimerRef.current);
@@ -253,22 +432,24 @@ export function ComparisonRevealModal({
     summaryMetricsReveal.setValue(0);
     summaryActionsReveal.setValue(0);
     compareEntryVeil.setValue(0);
-    floatingDoneOpacity.setValue(0);
-    setFloatingDoneHitArea(false);
-    if (floatingDoneHideTimerRef.current) {
-      clearTimeout(floatingDoneHideTimerRef.current);
-      floatingDoneHideTimerRef.current = null;
-    }
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ x: 0, animated: false });
-    });
     Animated.timing(stageReveal, {
       toValue: 1,
       duration: motionDurations.enter,
       easing: revealEasing.outHero,
       useNativeDriver: true
     }).start();
-  }, [visible]);
+
+    // Auto-open reel preview when entryStage is "reel"
+    if (entryStage === "reel") {
+      // Show morph animation briefly, then open the toggle view
+      setComposing(true);
+      setTimeout(() => {
+        setComposedDaySpan(progressDays);
+        setReelPreviewVisible(true);
+        setComposing(false);
+      }, 2200);
+    }
+  }, [visible, entryStage]);
 
   useEffect(() => {
     return () => {
@@ -280,72 +461,85 @@ export function ComparisonRevealModal({
         clearTimeout(openingTimerRef.current);
         openingTimerRef.current = null;
       }
-      if (floatingDoneHideTimerRef.current) {
-        clearTimeout(floatingDoneHideTimerRef.current);
-        floatingDoneHideTimerRef.current = null;
-      }
     };
   }, []);
 
-  const hideFloatingDone = () => {
-    if (floatingDoneHideTimerRef.current) {
-      clearTimeout(floatingDoneHideTimerRef.current);
-      floatingDoneHideTimerRef.current = null;
-    }
-    if (reducedMotion) {
-      floatingDoneOpacity.setValue(0);
-      setFloatingDoneHitArea(false);
-      return;
-    }
-    Animated.timing(floatingDoneOpacity, {
-      toValue: 0,
-      duration: controlTimings.hideDuration,
-      easing: revealEasing.inSoft,
-      useNativeDriver: true
-    }).start(() => {
-      setFloatingDoneHitArea(false);
-    });
-  };
-
-  const showFloatingDone = (autoHideDelay = controlTimings.autoHideDefault) => {
-    if (!(visible && (stage === "compare" || stage === "reel"))) return;
-    if (floatingDoneHideTimerRef.current) {
-      clearTimeout(floatingDoneHideTimerRef.current);
-      floatingDoneHideTimerRef.current = null;
-    }
-    setFloatingDoneHitArea(true);
-    if (reducedMotion) {
-      floatingDoneOpacity.setValue(1);
-    } else {
-      Animated.timing(floatingDoneOpacity, {
-        toValue: 1,
-        duration: controlTimings.showDuration,
-        easing: revealEasing.outHero,
-        useNativeDriver: true
-      }).start();
-    }
-    floatingDoneHideTimerRef.current = setTimeout(() => {
-      hideFloatingDone();
-    }, Math.max(900, autoHideDelay));
-  };
-
-  const handleMediaTouchStart = () => {
-    if (stage !== "compare" && stage !== "reel") return;
-    hideFloatingDone();
-  };
-
-  const handleMediaTouchEnd = () => {
-    if (stage !== "compare" && stage !== "reel") return;
-    showFloatingDone(controlTimings.autoHideAfterInteraction);
-  };
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void (async () => {
+      const capped = await readQuickShareCap({
+        journeyId,
+        chapterNumber
+      });
+      if (cancelled) return;
+      setQuickShareCapReached(capped);
+      setQuickShareCapLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, journeyId, chapterNumber]);
 
   useEffect(() => {
-    if (!(visible && (stage === "compare" || stage === "reel"))) {
-      hideFloatingDone();
+    if (!visible) {
+      stageViewKeyRef.current = null;
+      summaryNudgeKeyRef.current = null;
+      quickShareImpressionKeyRef.current = null;
+      quickShareSuppressedKeyRef.current = null;
       return;
     }
-    showFloatingDone(controlTimings.autoHideOnStageEnter);
-  }, [visible, stage]);
+    const stageViewKey = `${chapterNumber}:${stage}`;
+    if (stageViewKeyRef.current === stageViewKey) return;
+    stageViewKeyRef.current = stageViewKey;
+    trackEvent("comparison_reveal_stage_viewed", {
+      ...analyticsBase,
+      stage,
+      compareCardCount: cards.length,
+      reelCardCount: reelCards.length
+    });
+  }, [visible, stage, chapterNumber, analyticsBase, cards.length, reelCards.length]);
+
+  useEffect(() => {
+    if (!visible || stage !== "summary") return;
+    const key = `${chapterNumber}:${summaryNudgeState}`;
+    if (summaryNudgeKeyRef.current === key) return;
+    summaryNudgeKeyRef.current = key;
+    trackEvent("reel_summary_nudge_viewed", {
+      ...analyticsBase,
+      summaryNudgeState,
+      reelShared,
+      reelSaved
+    });
+  }, [visible, stage, chapterNumber, summaryNudgeState, reelShared, reelSaved, analyticsBase]);
+
+  useEffect(() => {
+    if (!visible || stage !== "summary" || !showQuickShareCta) return;
+    const key = `${journeyId ?? "none"}:${chapterNumber}:${reelPrepareStatus}:${reelShared}:${reelSaved}`;
+    if (quickShareImpressionKeyRef.current === key) return;
+    quickShareImpressionKeyRef.current = key;
+    trackEvent("reel_quick_share_impression", {
+      ...analyticsBase,
+      reelSaved,
+      trigger: "summary_ready_unshared"
+    });
+    void writeQuickShareCap({
+      journeyId,
+      chapterNumber
+    });
+  }, [visible, stage, showQuickShareCta, journeyId, chapterNumber, reelPrepareStatus, reelShared, reelSaved, analyticsBase]);
+
+  useEffect(() => {
+    if (!visible || stage !== "summary" || !quickShareCapLoaded || !quickShareCapReached || reelShared) return;
+    const key = `${journeyId ?? "none"}:${chapterNumber}:cap`;
+    if (quickShareSuppressedKeyRef.current === key) return;
+    quickShareSuppressedKeyRef.current = key;
+    trackEvent("reel_quick_share_suppressed", {
+      ...analyticsBase,
+      reason: "cap_active",
+      reelSaved
+    });
+  }, [visible, stage, quickShareCapLoaded, quickShareCapReached, reelShared, journeyId, chapterNumber, reelSaved, analyticsBase]);
 
   useEffect(() => {
     if (!visible) return;
@@ -355,10 +549,12 @@ export function ComparisonRevealModal({
         : stage === "opening"
           ? 0.9
         : stage === "compare"
-          ? Math.min(2, activeIndex + 1)
+          ? compareFocus === "then"
+            ? 1.6
+            : 2
           : stage === "reel"
             ? 2.6
-          : 3;
+            : 3;
     if (reducedMotion) {
       backgroundDrift.setValue(target);
       return;
@@ -369,7 +565,89 @@ export function ComparisonRevealModal({
       easing: revealEasing.inOutCinematic,
       useNativeDriver: true
     }).start();
-  }, [visible, stage, activeIndex, reducedMotion, backgroundDrift]);
+  }, [visible, stage, compareFocus, reducedMotion, backgroundDrift]);
+
+  useEffect(() => {
+    if (!visible || stage !== "reel") return;
+    let cancelled = false;
+    void (async () => {
+      const startedAtMs = Date.now();
+      trackEvent("reel_prewarm_started", {
+        ...analyticsBase,
+        summaryClipId: summaryClip?.id ?? null,
+        attempt: 1,
+        trigger: "reel_stage"
+      });
+      const result = await prepareReelAsset(reelExportInput);
+      if (cancelled) return;
+      if (result.success) {
+        setReelReady(true);
+        setReelPrepareStatus((current) => (current === "idle" ? "ready" : current));
+      }
+      trackEvent("reel_prewarm_completed", {
+        ...analyticsBase,
+        summaryClipId: summaryClip?.id ?? null,
+        success: result.success,
+        code: result.code,
+        sourceKind: result.sourceKind,
+        cacheHit: result.cacheHit,
+        durationMs: Date.now() - startedAtMs,
+        attempt: 1,
+        trigger: "reel_stage"
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, stage, chapterNumber, summaryClip?.id, analyticsBase, reelExportInput]);
+
+  useEffect(() => {
+    if (!visible || stage !== "summary") return;
+    if (reelReady && reelPrepareStatus === "ready") return;
+    let cancelled = false;
+    setReelPrepareStatus("preparing");
+    void (async () => {
+      const maxAttempts = 2;
+      let attempt = 0;
+      let finalResult: Awaited<ReturnType<typeof prepareReelAsset>> | null = null;
+      while (attempt < maxAttempts) {
+        attempt += 1;
+        const startedAtMs = Date.now();
+        trackEvent("reel_prewarm_started", {
+          ...analyticsBase,
+          summaryClipId: summaryClip?.id ?? null,
+          attempt,
+          trigger: "summary_auto"
+        });
+        const result = await prepareReelAsset(reelExportInput);
+        if (cancelled) return;
+        trackEvent("reel_prewarm_completed", {
+          ...analyticsBase,
+          summaryClipId: summaryClip?.id ?? null,
+          success: result.success,
+          code: result.code,
+          sourceKind: result.sourceKind,
+          cacheHit: result.cacheHit,
+          durationMs: Date.now() - startedAtMs,
+          attempt,
+          trigger: "summary_auto"
+        });
+        finalResult = result;
+        if (result.success || result.code !== "prepare_failed") break;
+      }
+      if (cancelled || !finalResult) return;
+      setReelReady(finalResult.success);
+      setReelPrepareStatus(finalResult.success ? "ready" : "failed");
+      if (finalResult.success) {
+        setReelExportMessage(null);
+      } else {
+        setReelExportMessage((current) => current ?? finalResult.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, stage, chapterNumber, summaryClip?.id, analyticsBase, reelExportInput]);
 
   useEffect(() => {
     if (!visible) return;
@@ -388,22 +666,22 @@ export function ComparisonRevealModal({
     summaryHeroReveal.setValue(0);
     summaryMetricsReveal.setValue(0);
     summaryActionsReveal.setValue(0);
-    Animated.stagger(cadenceDuration(140), [
+    Animated.stagger(pacedDuration(140), [
       Animated.timing(summaryHeroReveal, {
         toValue: 1,
-        duration: cadenceDuration(920),
+        duration: pacedDuration(920),
         easing: revealEasing.outCinematic,
         useNativeDriver: true
       }),
       Animated.timing(summaryMetricsReveal, {
         toValue: 1,
-        duration: cadenceDuration(760),
+        duration: pacedDuration(760),
         easing: revealEasing.outCinematic,
         useNativeDriver: true
       }),
       Animated.timing(summaryActionsReveal, {
         toValue: 1,
-        duration: cadenceDuration(680),
+        duration: pacedDuration(680),
         easing: revealEasing.outCinematic,
         useNativeDriver: true
       })
@@ -411,7 +689,7 @@ export function ComparisonRevealModal({
   }, [stage, visible, reducedMotion, summaryHeroReveal, summaryMetricsReveal, summaryActionsReveal, chapterNumber]);
 
   useEffect(() => {
-    if (stage !== "reel" || !visible || !cards.length || !reelPlaying) {
+    if (stage !== "reel" || !visible || !reelCards.length || !reelPlaying) {
       if (reelTimerRef.current) {
         clearInterval(reelTimerRef.current);
         reelTimerRef.current = null;
@@ -419,7 +697,7 @@ export function ComparisonRevealModal({
       return;
     }
     reelTimerRef.current = setInterval(() => {
-      setReelIndex((current) => (current + 1) % cards.length);
+      setReelIndex((current) => (current + 1) % reelCards.length);
     }, 2000);
     return () => {
       if (reelTimerRef.current) {
@@ -427,7 +705,7 @@ export function ComparisonRevealModal({
         reelTimerRef.current = null;
       }
     };
-  }, [stage, visible, cards.length, reelPlaying]);
+  }, [stage, visible, reelCards.length, reelPlaying]);
 
   useEffect(() => {
     if (!visible) return;
@@ -482,6 +760,15 @@ export function ComparisonRevealModal({
 
   function handleCloseRequest() {
     if (closing) return;
+    trackEvent("comparison_reveal_closed", {
+      ...analyticsBase,
+      stage,
+      reelReady,
+      reelPrepareStatus,
+      reelShared,
+      reelSaved,
+      hadExportMessage: Boolean(reelExportMessage)
+    });
     setClosing(true);
 
     Animated.sequence([
@@ -527,10 +814,83 @@ export function ComparisonRevealModal({
     });
   }
 
-  function jumpToNextSlide() {
-    const nextIndex = Math.min(cards.length - 1, activeIndex + 1);
-    setActiveIndex(nextIndex);
-    scrollRef.current?.scrollTo({ x: nextIndex * cardWidth, animated: true });
+  async function handleSharePress(actionSurface: "summary_primary" | "summary_quick" | "reel_primary" | "unlock_primary" | "compare_primary") {
+    if (reelExporting || reelSaving) return;
+    if (actionSurface === "summary_quick") {
+      setQuickShareDismissed(true);
+      trackEvent("reel_quick_share_clicked", {
+        ...analyticsBase,
+        reelSaved
+      });
+    }
+    triggerSelectionHaptic();
+    const startedAtMs = Date.now();
+    trackEvent("reel_share_started", {
+      ...analyticsBase,
+      reelReady,
+      actionSurface
+    });
+    setReelExporting(true);
+    const exportInput = actionSurface === "compare_primary" ? compareExportInput : reelExportInput;
+    const result = await exportAndShareReel(exportInput);
+    setReelExportMessage(result.message);
+    setReelExporting(false);
+    if (result.success) {
+      setReelShared(true);
+      trackEvent("reveal_shared", {
+        ...analyticsBase,
+        reelReady,
+        sourceKind: result.sourceKind,
+        cacheHit: result.cacheHit,
+        actionSurface
+      });
+    }
+    trackEvent("reel_share_completed", {
+      ...analyticsBase,
+      reelReady,
+      success: result.success,
+      code: result.code,
+      sourceKind: result.sourceKind,
+      cacheHit: result.cacheHit,
+      durationMs: Date.now() - startedAtMs,
+      actionSurface
+    });
+  }
+
+  async function handleSavePress(actionSurface: "summary_primary" | "compare_primary") {
+    if (reelExporting || reelSaving) return;
+    triggerSelectionHaptic();
+    const startedAtMs = Date.now();
+    trackEvent("reel_save_started", {
+      ...analyticsBase,
+      reelReady,
+      actionSurface
+    });
+    setReelSaving(true);
+    const exportInput = actionSurface === "compare_primary" ? compareExportInput : reelExportInput;
+    const result = await exportAndSaveReel(exportInput);
+    setReelExportMessage(result.message);
+    setReelSaving(false);
+    if (result.success) {
+      setReelSaved(true);
+      trackEvent("reveal_saved", {
+        ...analyticsBase,
+        reelReady,
+        sourceKind: result.sourceKind,
+        cacheHit: result.cacheHit,
+        actionSurface
+      });
+    }
+    trackEvent("reel_save_completed", {
+      ...analyticsBase,
+      reelReady,
+      success: result.success,
+      code: result.code,
+      sourceKind: result.sourceKind,
+      cacheHit: result.cacheHit,
+      durationMs: Date.now() - startedAtMs,
+      actionSurface
+    });
   }
 
   function finishOpeningToCompare() {
@@ -546,7 +906,7 @@ export function ComparisonRevealModal({
     compareEntryVeil.setValue(1);
     Animated.timing(stageReveal, {
       toValue: 0,
-      duration: cadenceDuration(360),
+      duration: pacedDuration(360),
       easing: revealEasing.inSoft,
       useNativeDriver: true
     }).start(() => {
@@ -555,13 +915,13 @@ export function ComparisonRevealModal({
       Animated.parallel([
         Animated.timing(stageReveal, {
           toValue: 1,
-          duration: cadenceDuration(680),
+          duration: pacedDuration(680),
           easing: revealEasing.outCinematic,
           useNativeDriver: true
         }),
         Animated.timing(compareEntryVeil, {
           toValue: 0,
-          duration: cadenceDuration(760),
+          duration: pacedDuration(760),
           easing: revealEasing.outCinematic,
           useNativeDriver: true
         })
@@ -607,15 +967,15 @@ export function ComparisonRevealModal({
 
   const stageTitle =
     stage === "unlock"
-      ? `Chapter ${chapterNumber}`
+      ? `chapter ${chapterNumber}`
       : stage === "compare"
-        ? "Then vs Now"
+        ? "before vs now"
       : stage === "reel"
-        ? "Chapter Reel"
+        ? "reveal reel"
       : stage === "summary"
-        ? "Chapter complete"
+        ? "chapter complete"
         : stage === "next_chapter"
-          ? "Next chapter"
+          ? "next chapter"
           : presetLabel;
   const stageSubtitle = null;
   const canStartNextChapter = typeof onStartNextChapter === "function";
@@ -641,8 +1001,14 @@ export function ComparisonRevealModal({
   );
 
   return (
+    <>
     <Modal visible={visible} animationType="none" transparent onRequestClose={handleCloseRequest}>
-      <Animated.View style={[styles.compareModalBackdrop, { opacity: modalBackdropReveal }]}>
+      {entryStage === "reel" ? (
+        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: "#f4efe6", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <LogoMorphLoader size={100} color="#E8450A" duration={900} />
+        </View>
+      ) : null}
+      <Animated.View style={[styles.compareModalBackdrop, { opacity: modalBackdropReveal }, entryStage === "reel" ? { display: "none" } : null]}>
         <Animated.View
           pointerEvents="none"
           style={[
@@ -750,7 +1116,7 @@ export function ComparisonRevealModal({
             }
           ]}
         >
-          {stage !== "opening" && stage !== "compare" && stage !== "reel" ? (
+          {stage !== "opening" && stage !== "compare" ? (
             <Animated.View
               style={[
                 styles.headerWrap,
@@ -768,27 +1134,6 @@ export function ComparisonRevealModal({
               ]}
             >
               <ComparisonRevealHeader title={stageTitle} subtitle={stageSubtitle} closing={closing} onClose={handleCloseRequest} />
-            </Animated.View>
-          ) : null}
-          {stage === "compare" || stage === "reel" ? (
-            <Animated.View
-              pointerEvents={floatingDoneHitArea ? "auto" : "none"}
-              style={[
-                styles.floatingDoneWrap,
-                {
-                  top: Math.max(8, insets.top + 2),
-                  opacity: floatingDoneOpacity
-                }
-              ]}
-            >
-              <TactilePressable
-                style={[styles.floatingDoneButton, closing ? styles.floatingDoneButtonDisabled : undefined]}
-                pressScale={0.96}
-                onPress={handleCloseRequest}
-                disabled={closing}
-              >
-                <Text style={styles.floatingDoneText}>Done</Text>
-              </TactilePressable>
             </Animated.View>
           ) : null}
 
@@ -810,18 +1155,32 @@ export function ComparisonRevealModal({
           >
             {stage === "unlock" ? (
               <Animated.View style={[styles.unlockCard, { transform: [{ scale: unlockPulse }] }]}>
-                <Text style={styles.unlockKicker}>Chapter {chapterNumber}</Text>
-                <Text style={styles.unlockTitle}>Your chapter is ready.</Text>
-                <Text style={styles.unlockMeta}>Open what you built.</Text>
-                <TactilePressable
-                  stretch
-                  style={[styles.unlockButton, capsuleOpening ? styles.unlockButtonDisabled : undefined]}
-                  pressScale={0.974}
-                  onPress={handleOpenRevealPress}
-                  disabled={capsuleOpening}
-                >
-                  <Text style={styles.unlockButtonText}>{capsuleOpening ? "Opening..." : "Open Reveal"}</Text>
-                </TactilePressable>
+                <Text style={styles.unlockKicker}>chapter {chapterNumber}</Text>
+                <Text style={styles.unlockTitle}>your reveal is live.</Text>
+                <Text style={styles.unlockMeta}>{storylineCaption ?? "play it and review your arc."}</Text>
+                <View style={styles.unlockActionRow}>
+                  <TactilePressable
+                    stretch
+                    style={[styles.unlockButton, capsuleOpening ? styles.unlockButtonDisabled : undefined]}
+                    pressScale={0.974}
+                    onPress={handleOpenRevealPress}
+                    disabled={capsuleOpening}
+                  >
+                    <Text style={styles.unlockButtonText}>{capsuleOpening ? "opening..." : "play reveal"}</Text>
+                  </TactilePressable>
+                  <TactilePressable
+                    stretch
+                    style={[styles.unlockShareButton, reelExporting || reelSaving ? styles.unlockButtonDisabled : undefined]}
+                    pressScale={0.974}
+                    onPress={() => {
+                      void handleSharePress("unlock_primary");
+                    }}
+                    disabled={reelExporting || reelSaving}
+                  >
+                    <Text style={styles.unlockShareButtonText}>{reelExporting ? "preparing..." : "share reveal"}</Text>
+                  </TactilePressable>
+                </View>
+                {reelExportMessage ? <Text style={styles.unlockExportMessage}>{reelExportMessage}</Text> : null}
               </Animated.View>
             ) : null}
 
@@ -883,46 +1242,43 @@ export function ComparisonRevealModal({
 
             {stage === "compare" && cards.length ? (
               <View style={styles.compareStage}>
-                <View
-                  style={[styles.compareMediaSurface, { height: videoHeight }]}
-                  onTouchStart={handleMediaTouchStart}
-                  onTouchEnd={handleMediaTouchEnd}
-                  onTouchCancel={handleMediaTouchEnd}
-                >
-                  <ComparisonRevealPager
-                    cards={cards}
-                    cardWidth={cardWidth}
-                    videoHeight={videoHeight}
-                    visible={visible}
-                    activeIndex={activeIndex}
-                    scrollRef={scrollRef}
+                <View style={[styles.compareMediaSurface, { height: compareVideoHeight }]}>
+                  <ThenNowCompareStage
+                    thenClip={comparison?.thenClip ?? cards[0].clip}
+                    nowClip={comparison?.nowClip ?? cards[cards.length - 1].clip}
+                    thenLabel={comparison?.thenLabel ?? cards[0].title}
+                    nowLabel={comparison?.nowLabel ?? cards[cards.length - 1].title}
+                    onFocusChange={setCompareFocus}
+                    videoHeight={compareVideoHeight}
+                    overlayTopInset={compareOverlayTopInset}
+                    overlaySideInset={compareOverlaySideInset}
+                    overlayBottomInset={compareOverlayBottomInset}
+                    visible={visible && stage === "compare"}
                     contentReveal={nowPanelReveal}
-                    onIndexChange={setActiveIndex}
                   />
                   <Animated.View pointerEvents="none" style={[styles.compareEntryVeil, { opacity: compareEntryVeil }]} />
-                  <Animated.View
+                  <TactilePressable
                     style={[
-                      styles.compareTopOverlay,
+                      styles.compareDoneOverlayButton,
                       {
-                        opacity: labelsReveal,
-                        transform: [
-                          {
-                            translateY: labelsReveal.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [8, 0]
-                            })
-                          }
-                        ]
-                      }
+                        top: compareOverlayTopInset,
+                        right: compareOverlaySideInset
+                      },
+                      closing ? styles.compareDoneOverlayButtonDisabled : undefined
                     ]}
+                    pressScale={0.97}
+                    onPress={handleCloseRequest}
+                    disabled={closing}
                   >
-                    <Text style={styles.compareMetaPill}>{cards[activeIndex]?.badge ?? ""}</Text>
-                  </Animated.View>
+                    <Text style={styles.compareDoneOverlayText}>done</Text>
+                  </TactilePressable>
                 </View>
                 <Animated.View
                   style={[
                     styles.compareControlsDock,
                     {
+                      paddingHorizontal: compareDockHorizontalPadding,
+                      paddingBottom: Math.max(20, insets.bottom + 14),
                       opacity: labelsReveal,
                       transform: [
                         {
@@ -935,40 +1291,90 @@ export function ComparisonRevealModal({
                     }
                   ]}
                 >
-                  <ComparisonRevealIndicators keys={cards.map((entry) => entry.key)} activeIndex={activeIndex} />
+                  <View style={[styles.compareActionRow, compareActionsStacked ? styles.compareActionRowStacked : null]}>
+                    <TactilePressable
+                      stretch
+                      style={[
+                        styles.compareShareButton,
+                        compareActionsStacked ? styles.compareActionButtonStacked : null,
+                        reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined
+                      ]}
+                      pressScale={0.972}
+                      onPress={() => {
+                        void handleSharePress("compare_primary");
+                      }}
+                      disabled={reelExporting || reelSaving}
+                    >
+                      <Text style={styles.compareShareButtonText}>{reelExporting ? "preparing..." : "share compare"}</Text>
+                    </TactilePressable>
+                    <View
+                      style={
+                        compareActionsStacked
+                          ? styles.compareStackedButtonSpacer
+                          : [styles.comparePairButtonSpacer, { width: comparePairGap }]
+                      }
+                    />
+                    <TactilePressable
+                      stretch
+                      style={[
+                        styles.compareSaveButton,
+                        compareActionsStacked ? styles.compareActionButtonStacked : null,
+                        reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined
+                      ]}
+                      pressScale={0.972}
+                      onPress={() => {
+                        void handleSavePress("compare_primary");
+                      }}
+                      disabled={reelExporting || reelSaving}
+                    >
+                      <Text style={styles.compareSaveButtonText}>{compareSaveLabel}</Text>
+                    </TactilePressable>
+                  </View>
                   <TactilePressable
                     stretch
-                    style={styles.compareContinueFloating}
+                    style={[styles.compareContinueFloating, { marginTop: comparePrimaryGap }]}
                     pressScale={0.972}
                     onPress={() => {
+                      if (composing) return;
                       triggerSelectionHaptic();
-                      if (activeIndex < cards.length - 1) {
-                        jumpToNextSlide();
-                        return;
-                      }
-                      setReelIndex(0);
-                      setReelPlaying(true);
-                      transitionToStage("reel");
+                      setComposing(true);
+                      setReelExportMessage(null);
+                      void (async () => {
+                        try {
+                          const uri = await resolveReelUri(reelExportInput);
+                          if (!uri) {
+                            setReelExportMessage("couldn't prepare reel. try again.");
+                            setComposing(false);
+                            return;
+                          }
+                          setComposedDaySpan(progressDays);
+                          setReelPreviewVisible(true);
+                          setComposing(false);
+                        } catch (err) {
+                          console.error("[ComparisonReveal] Reel resolve error:", err);
+                          setReelExportMessage("something went wrong. try again.");
+                          setComposing(false);
+                        }
+                      })();
                     }}
+                    disabled={composing}
                   >
-                    <Text style={styles.compareContinueFloatingText}>Continue</Text>
+                    <Text style={styles.compareContinueFloatingText}>
+                      {composing ? "loading..." : "open reel"}
+                    </Text>
                   </TactilePressable>
+                  {reelExportMessage ? <Text style={styles.reelExportMessage}>{reelExportMessage}</Text> : null}
                 </Animated.View>
               </View>
             ) : null}
 
-            {stage === "reel" && cards.length ? (
+            {stage === "reel" && reelCards.length ? (
               <View style={styles.reelStage}>
-                <View
-                  style={styles.reelVideoWrap}
-                  onTouchStart={handleMediaTouchStart}
-                  onTouchEnd={handleMediaTouchEnd}
-                  onTouchCancel={handleMediaTouchEnd}
-                >
+                <View style={styles.reelVideoWrap}>
                   <LoopingVideoPlayer
-                    uri={cards[reelIndex]?.clip.videoUrl ?? cards[0].clip.videoUrl}
-                    mediaType={cards[reelIndex]?.clip.captureType ?? cards[0].clip.captureType}
-                    posterUri={cards[reelIndex]?.clip.thumbnailUrl ?? cards[0].clip.thumbnailUrl}
+                    uri={reelCards[reelIndex]?.clip.videoUrl ?? reelCards[0].clip.videoUrl}
+                    mediaType={reelCards[reelIndex]?.clip.captureType ?? reelCards[0].clip.captureType}
+                    posterUri={reelCards[reelIndex]?.clip.thumbnailUrl ?? reelCards[0].clip.thumbnailUrl}
                     style={[styles.reelVideo, { height: reelVideoHeight }]}
                     resizeMode={ResizeMode.COVER}
                     showControls
@@ -980,25 +1386,43 @@ export function ComparisonRevealModal({
                 </View>
 
                 <Animated.View style={[styles.reelControlsWrap, { opacity: labelsReveal }]}>
+                  <View style={styles.reelMetaRow}>
+                    <Text style={styles.reelMetaPill}>auto trailer</Text>
+                    <Text style={styles.reelMetaCopy}>{reelMomentsLabel}</Text>
+                  </View>
+                  <Text style={styles.reelStatsCopy}>{reelStatsLabel}</Text>
                   <View style={styles.reelIndicatorRow}>
-                    {cards.map((entry, index) => (
+                    {reelCards.map((entry, index) => (
                       <View key={`reel-${entry.key}`} style={styles.reelIndicatorShell}>
                         <View style={[styles.reelIndicatorFill, index === reelIndex ? styles.reelIndicatorFillActive : undefined]} />
                       </View>
                     ))}
                   </View>
-
-                  <TactilePressable
-                    stretch
-                    style={styles.reelContinueButton}
-                    pressScale={0.972}
-                    onPress={() => {
-                      triggerSelectionHaptic();
-                      transitionToStage("summary");
-                    }}
-                  >
-                    <Text style={styles.reelContinueButtonText}>Continue</Text>
-                  </TactilePressable>
+                  <View style={styles.reelActionRow}>
+                    <TactilePressable
+                      stretch
+                      style={[styles.reelShareButton, reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined]}
+                      pressScale={0.972}
+                      onPress={() => {
+                        void handleSharePress("reel_primary");
+                      }}
+                      disabled={reelExporting || reelSaving}
+                    >
+                      <Text style={styles.reelShareButtonText}>{shareButtonLabel}</Text>
+                    </TactilePressable>
+                    <TactilePressable
+                      stretch
+                      style={styles.reelContinueButton}
+                      pressScale={0.972}
+                      onPress={() => {
+                        triggerSelectionHaptic();
+                        onClose();
+                      }}
+                    >
+                      <Text style={styles.reelContinueButtonText}>done</Text>
+                    </TactilePressable>
+                  </View>
+                  {reelExportMessage ? <Text style={styles.reelExportMessage}>{reelExportMessage}</Text> : null}
                 </Animated.View>
               </View>
             ) : null}
@@ -1051,8 +1475,8 @@ export function ComparisonRevealModal({
                     )}
                     <View pointerEvents="none" style={styles.summaryHeroShade} />
                     <View pointerEvents="none" style={styles.summaryHeroTextWrap}>
-                      <Text style={styles.summaryHeroKicker}>Chapter {chapterNumber} complete</Text>
-                      <Text style={styles.summaryHeroTitle}>You built this.</Text>
+                      <Text style={styles.summaryHeroKicker}>chapter {chapterNumber} complete</Text>
+                      <Text style={styles.summaryHeroTitle}>you built this.</Text>
                     </View>
                   </View>
                 </Animated.View>
@@ -1075,13 +1499,13 @@ export function ComparisonRevealModal({
                 >
                   <View style={styles.summaryMetricsRow}>
                     <View style={styles.summaryMetricPill}>
-                      <Text style={styles.summaryMetricLabel}>Practices</Text>
+                      <Text style={styles.summaryMetricLabel}>practices</Text>
                       <Text style={styles.summaryMetricValue}>
                         {Math.min(progressDays, milestoneLengthDays)} / {milestoneLengthDays}
                       </Text>
                     </View>
                     <View style={styles.summaryMetricPill}>
-                      <Text style={styles.summaryMetricLabel}>Streak</Text>
+                      <Text style={styles.summaryMetricLabel}>streak</Text>
                       <Text style={styles.summaryMetricValue}>{currentStreak} days</Text>
                     </View>
                   </View>
@@ -1103,19 +1527,145 @@ export function ComparisonRevealModal({
                     }
                   ]}
                 >
-                  <Text style={styles.summaryCopy}>You showed up. The change is real.</Text>
+                  {storylineHeadline ? <Text style={styles.summaryStorylineHeadline}>{storylineHeadline}</Text> : null}
+                  <Text style={styles.summaryCopy}>{storylineReflection ?? "you showed up. the change is real."}</Text>
+                  <Text style={styles.summaryTrailerLine}>reel cut ready: then {"->"} moments {"->"} now ({reelMomentsLabel}).</Text>
+                  <Text style={styles.summaryReadyLine}>{summaryReadyLabel}</Text>
+                  <Text style={[styles.summaryNudgeLine, summaryNudgeState === "complete" ? styles.summaryNudgeLineDone : undefined]}>
+                    {summaryNudgeCopy}
+                  </Text>
+                  {showQuickShareCta ? (
+                    <View style={styles.quickShareCard}>
+                      <Text style={styles.quickShareTitle}>reel ready now</Text>
+                      <Text style={styles.quickShareCopy}>share this chapter in one tap while momentum is high.</Text>
+                      <View style={styles.quickShareActionsRow}>
+                        <TactilePressable
+                          stretch
+                          style={[styles.quickShareButton, reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined]}
+                          pressScale={0.975}
+                          onPress={() => {
+                            void handleSharePress("summary_quick");
+                          }}
+                          disabled={reelExporting || reelSaving}
+                        >
+                          <Text style={styles.quickShareButtonText}>{reelExporting ? "preparing..." : "share fast"}</Text>
+                        </TactilePressable>
+                        <TactilePressable
+                          style={styles.quickShareDismissButton}
+                          pressScale={0.98}
+                          onPress={() => {
+                            setQuickShareDismissed(true);
+                            trackEvent("reel_quick_share_dismissed", {
+                              ...analyticsBase,
+                              reelSaved
+                            });
+                          }}
+                          disabled={reelExporting || reelSaving}
+                        >
+                          <Text style={styles.quickShareDismissText}>not now</Text>
+                        </TactilePressable>
+                      </View>
+                    </View>
+                  ) : null}
+                  {reelPrepareStatus === "failed" ? (
+                    <TactilePressable
+                      stretch
+                      style={[
+                        styles.summaryRetryButton,
+                        reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined
+                      ]}
+                      pressScale={0.975}
+                      onPress={async () => {
+                        if (reelExporting || reelSaving) return;
+                        triggerSelectionHaptic();
+                        setReelPrepareStatus("preparing");
+                        const startedAtMs = Date.now();
+                        trackEvent("reel_prewarm_started", {
+                          ...analyticsBase,
+                          summaryClipId: summaryClip?.id ?? null,
+                          attempt: 1,
+                          trigger: "manual_retry"
+                        });
+                        const result = await prepareReelAsset(reelExportInput);
+                        setReelReady(result.success);
+                        setReelPrepareStatus(result.success ? "ready" : "failed");
+                        setReelExportMessage(result.success ? "reel ready." : result.message);
+                        trackEvent("reel_prewarm_completed", {
+                          ...analyticsBase,
+                          summaryClipId: summaryClip?.id ?? null,
+                          success: result.success,
+                          code: result.code,
+                          sourceKind: result.sourceKind,
+                          cacheHit: result.cacheHit,
+                          durationMs: Date.now() - startedAtMs,
+                          attempt: 1,
+                          trigger: "manual_retry"
+                        });
+                      }}
+                      disabled={reelExporting || reelSaving}
+                    >
+                      <Text style={styles.summaryRetryButtonText}>retry reel prep</Text>
+                    </TactilePressable>
+                  ) : null}
+                  <View style={styles.summaryExportActions}>
+                    <TactilePressable
+                      stretch
+                      style={[
+                        styles.summaryExportButton,
+                        reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined
+                      ]}
+                      pressScale={0.975}
+                      onPress={() => {
+                        void handleSharePress("summary_primary");
+                      }}
+                      disabled={reelExporting || reelSaving}
+                    >
+                      <Text style={styles.summaryExportButtonText}>{shareButtonLabel}</Text>
+                    </TactilePressable>
+                    <TactilePressable
+                      stretch
+                      style={[
+                        styles.summarySaveButton,
+                        reelSaved ? styles.summarySaveButtonDone : undefined,
+                        reelExporting || reelSaving ? styles.summaryExportButtonDisabled : undefined
+                      ]}
+                      pressScale={0.975}
+                      onPress={() => {
+                        void handleSavePress("summary_primary");
+                      }}
+                      disabled={reelExporting || reelSaving}
+                    >
+                      <Text style={[styles.summarySaveButtonText, reelSaved ? styles.summarySaveButtonTextDone : undefined]}>{saveButtonLabel}</Text>
+                    </TactilePressable>
+                  </View>
+                  <View style={styles.summaryShareStateRow}>
+                    <View style={[styles.summaryShareStatePill, reelShared ? styles.summaryShareStatePillDone : undefined]}>
+                      <Text style={[styles.summaryShareStateText, reelShared ? styles.summaryShareStateTextDone : undefined]}>
+                        {reelShared ? "shared" : "unshared"}
+                      </Text>
+                    </View>
+                    <View style={[styles.summaryShareStatePill, reelSaved ? styles.summaryShareStatePillDone : undefined]}>
+                      <Text style={[styles.summaryShareStateText, reelSaved ? styles.summaryShareStateTextDone : undefined]}>
+                        {reelSaved ? "saved" : "unsaved"}
+                      </Text>
+                    </View>
+                  </View>
                   <TactilePressable
                     stretch
-                    style={styles.summaryExportButton}
+                    style={styles.receiptButton}
                     pressScale={0.975}
                     onPress={() => {
                       triggerSelectionHaptic();
-                      setReelExportMessage("Chapter reel export preview is ready. Full export ships next.");
+                      if (hasRevealExportPurchase()) {
+                        setReceiptVisible(true);
+                      } else {
+                        setReceiptPaywallVisible(true);
+                      }
                     }}
                   >
-                    <Text style={styles.summaryExportButtonText}>Save Reel</Text>
+                    <Text style={styles.receiptButtonText}>share receipt</Text>
                   </TactilePressable>
-                  {reelExportMessage ? <Text style={styles.reelExportMessage}>Export preview ready.</Text> : null}
+                  {reelExportMessage ? <Text style={styles.reelExportMessage}>{reelExportMessage}</Text> : null}
                   {canStartNextChapter ? (
                     <View style={styles.nextChapterSummaryWrap}>
                       <Text style={styles.nextChapterReason}>{recommendedNextReason}</Text>
@@ -1128,13 +1678,13 @@ export function ComparisonRevealModal({
                           transitionToStage("next_chapter");
                         }}
                       >
-                        <Text style={styles.nextChapterOpenButtonText}>Choose Next Chapter</Text>
+                        <Text style={styles.nextChapterOpenButtonText}>choose next chapter</Text>
                       </TactilePressable>
                     </View>
                   ) : null}
                   {chapterActionMessage ? <Text style={styles.chapterActionMessage}>{chapterActionMessage}</Text> : null}
                   <TactilePressable stretch style={styles.summaryDoneButton} pressScale={0.98} onPress={handleCloseRequest}>
-                    <Text style={styles.summaryDoneButtonText}>Done</Text>
+                    <Text style={styles.summaryDoneButtonText}>done</Text>
                   </TactilePressable>
                 </Animated.View>
               </Animated.ScrollView>
@@ -1142,13 +1692,14 @@ export function ComparisonRevealModal({
 
             {stage === "next_chapter" ? (
               <View style={styles.nextChapterStage}>
-                <Text style={styles.nextChapterStageTitle}>Start Chapter {chapterNumber + 1}</Text>
+                <Text style={styles.nextChapterStageTitle}>start chapter {chapterNumber + 1}</Text>
                 <Text style={styles.nextChapterStageSubtitle}>{recommendedNextReason}</Text>
 
                 <View style={styles.nextChapterCardsWrap}>
                   {nextMilestoneOptions.map((days) => {
                     const busy = nextChapterBusyLength === days;
                     const recommended = days === recommendedNextLength;
+                    const locked = days > 7 && !hasRevealExportPurchase();
                     const content = nextMilestoneCardContent[days];
                     return (
                       <TactilePressable
@@ -1156,23 +1707,25 @@ export function ComparisonRevealModal({
                         style={[
                           styles.nextChapterCard,
                           recommended ? styles.nextChapterCardRecommended : undefined,
-                          busy ? styles.nextChapterCardBusy : undefined
+                          busy ? styles.nextChapterCardBusy : undefined,
+                          locked ? { opacity: 0.4 } : undefined
                         ]}
                         pressScale={0.982}
                         onPress={() => {
+                          if (locked) return;
                           onStartNextChapter?.(days);
                         }}
-                        disabled={Boolean(nextChapterBusyLength)}
+                        disabled={Boolean(nextChapterBusyLength) || locked}
                       >
                         <View style={styles.nextChapterCardTop}>
                           <Text style={[styles.nextChapterCardDays, recommended ? styles.nextChapterCardDaysRecommended : undefined]}>
-                            {days} days
+                            {locked ? `🔒 ${days}` : days} days
                           </Text>
-                          {recommended ? <Text style={styles.nextChapterRecommendedPill}>Recommended</Text> : null}
+                          {recommended ? <Text style={styles.nextChapterRecommendedPill}>recommended</Text> : null}
                         </View>
                         <Text style={styles.nextChapterCardTitle}>{content.title}</Text>
                         <Text style={styles.nextChapterCardSubtitle}>{content.subtitle}</Text>
-                        <Text style={styles.nextChapterCardPayoff}>{busy ? "Starting..." : content.payoff}</Text>
+                        <Text style={styles.nextChapterCardPayoff}>{busy ? "starting..." : content.payoff}</Text>
                       </TactilePressable>
                     );
                   })}
@@ -1186,25 +1739,53 @@ export function ComparisonRevealModal({
                   pressScale={0.982}
                   onPress={() => {
                     triggerSelectionHaptic();
-                    transitionToStage("summary");
+                    onClose();
                   }}
                   disabled={Boolean(nextChapterBusyLength)}
                 >
-                  <Text style={styles.nextChapterBackButtonText}>Back to Summary</Text>
+                  <Text style={styles.nextChapterBackButtonText}>done</Text>
                 </TactilePressable>
               </View>
             ) : null}
           </Animated.View>
         </Animated.View>
       </Animated.View>
+      <ReelPreviewScreen
+        visible={reelPreviewVisible}
+        firstClipUri={comparison?.thenClip?.videoUrl ?? null}
+        latestClipUri={comparison?.nowClip?.videoUrl ?? null}
+        daySpan={composedDaySpan}
+        goalText={goalText}
+        onClose={() => {
+          setReelPreviewVisible(false);
+          onClose();
+        }}
+      />
     </Modal>
+    <ProofReceiptModal
+      visible={receiptVisible}
+      onClose={() => setReceiptVisible(false)}
+      skillName={presetLabel ?? "practice"}
+      chapterNumber={chapterNumber}
+      daysPracticed={progressDays}
+      streak={currentStreak}
+    />
+    <PaywallModal
+      visible={receiptPaywallVisible}
+      onClose={() => setReceiptPaywallVisible(false)}
+      onPurchased={() => {
+        setReceiptPaywallVisible(false);
+        setReceiptVisible(true);
+      }}
+    />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   compareModalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(5,12,22,0.96)"
+    backgroundColor: "rgba(0,0,0,0.58)"
   },
   parallaxOrbA: {
     position: "absolute",
@@ -1213,7 +1794,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     left: -96,
     top: 76,
-    backgroundColor: "rgba(55,136,255,0.24)"
+    backgroundColor: "rgba(255,90,31,0.12)"
   },
   parallaxOrbB: {
     position: "absolute",
@@ -1222,36 +1803,14 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     right: -128,
     bottom: 96,
-    backgroundColor: "rgba(74,164,255,0.2)"
+    backgroundColor: "rgba(0,0,0,0.08)"
   },
   compareModalCard: {
     flex: 1,
-    backgroundColor: "rgba(8,16,30,0.98)"
+    backgroundColor: "rgba(246,240,232,0.99)"
   },
   headerWrap: {
     gap: 0
-  },
-  floatingDoneWrap: {
-    position: "absolute",
-    top: 8,
-    right: 12,
-    zIndex: 20
-  },
-  floatingDoneButton: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    backgroundColor: "rgba(6,16,30,0.5)",
-    paddingHorizontal: 12,
-    paddingVertical: 6
-  },
-  floatingDoneButtonDisabled: {
-    opacity: 0.62
-  },
-  floatingDoneText: {
-    color: "#dceaff",
-    fontWeight: "700",
-    fontSize: 13
   },
   stageWrap: {
     flex: 1
@@ -1259,36 +1818,45 @@ const styles = StyleSheet.create({
   unlockCard: {
     marginHorizontal: 16,
     marginTop: 16,
-    borderRadius: 20,
+    borderRadius: theme.shape.cardRadiusLg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(245,239,230,0.98)",
     padding: 16
   },
   unlockKicker: {
     marginTop: 10,
-    color: "#cadcf3",
+    color: "#2a2a2a",
     fontWeight: "800",
     fontSize: 12,
-    letterSpacing: 0.7,
-    textTransform: "uppercase"
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   unlockTitle: {
     marginTop: 6,
-    color: "#eff7ff",
+    color: "#101010",
     fontWeight: "800",
     fontSize: 30,
-    lineHeight: 34
+    lineHeight: 34,
+    fontFamily: theme.typography.display
   },
   unlockMeta: {
     marginTop: 8,
-    color: "#c6d8ef",
-    fontWeight: "700",
-    fontSize: 14
+    color: "#2a2a2a",
+    fontWeight: "600",
+    fontSize: 14,
+    fontFamily: theme.typography.body
+  },
+  unlockActionRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10
   },
   unlockButton: {
-    marginTop: 14,
-    borderRadius: 14,
+    flex: 1,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
     backgroundColor: theme.colors.accent,
     alignItems: "center",
     justifyContent: "center",
@@ -1298,9 +1866,34 @@ const styles = StyleSheet.create({
     opacity: 0.66
   },
   unlockButtonText: {
-    color: "#eaf4ff",
+    color: "#101010",
     fontWeight: "800",
-    fontSize: 15
+    fontSize: 14,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  unlockShareButton: {
+    flex: 1,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12
+  },
+  unlockShareButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  unlockExportMessage: {
+    marginTop: 8,
+    color: "#2a2a2a",
+    fontWeight: "700",
+    fontSize: 12
   },
   openingStage: {
     flex: 1,
@@ -1310,7 +1903,7 @@ const styles = StyleSheet.create({
   },
   openingVeil: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#06101d"
+    backgroundColor: "rgba(240,232,220,0.96)"
   },
   openingAnimationShell: {
     width: "116%",
@@ -1329,36 +1922,39 @@ const styles = StyleSheet.create({
     width: "82%",
     aspectRatio: 1,
     borderRadius: 999,
-    backgroundColor: "rgba(102,188,255,0.16)"
+    backgroundColor: "rgba(255,90,31,0.14)"
   },
   openingAnimation: {
     width: "100%",
     height: "100%"
   },
   compareMetaPill: {
-    borderRadius: 999,
+    borderRadius: theme.shape.pillRadius,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    color: "#d7e8fb",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    color: "#101010",
     fontWeight: "800",
     fontSize: 11,
-    letterSpacing: 0.55,
-    textTransform: "uppercase",
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label,
     paddingHorizontal: 10,
     paddingVertical: 4
   },
   compareStage: {
     flex: 1,
-    marginHorizontal: 18,
-    paddingTop: 6,
-    paddingBottom: 6,
-    justifyContent: "center"
+    paddingTop: 0,
+    paddingBottom: 0,
+    justifyContent: "flex-start",
+    overflow: "hidden"
   },
   compareMediaSurface: {
     width: "100%",
-    backgroundColor: "#061220",
-    borderRadius: 24,
+    backgroundColor: "#0c0c0c",
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: "transparent",
+    padding: 0,
     overflow: "hidden"
   },
   compareTopOverlay: {
@@ -1367,30 +1963,117 @@ const styles = StyleSheet.create({
     left: 16
   },
   compareControlsDock: {
-    marginTop: 14,
-    gap: 12
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 14,
+    paddingHorizontal: 18,
+    gap: 14,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(246,240,232,0.98)"
   },
   compareEntryVeil: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#071321"
+    backgroundColor: "rgba(0,0,0,0.16)"
   },
   compareContinueFloating: {
-    borderRadius: 999,
+    marginTop: 0,
+    borderRadius: theme.shape.pillRadius,
     borderWidth: 1,
-    borderColor: "rgba(124,189,255,0.7)",
-    backgroundColor: "rgba(10,86,219,0.92)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: theme.colors.accent,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 58,
+    minHeight: 64,
     paddingHorizontal: 28,
-    paddingVertical: 15
+    paddingVertical: 16
   },
   compareContinueFloatingText: {
-    color: "#f0f7ff",
+    color: "#101010",
     fontWeight: "800",
-    fontSize: 17,
+    fontSize: 16,
     lineHeight: 23,
-    letterSpacing: 0.2
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  compareDoneOverlayButton: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  compareDoneOverlayButtonDisabled: {
+    opacity: 0.62
+  },
+  compareDoneOverlayText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  compareActionRow: {
+    flexDirection: "row",
+    alignItems: "stretch"
+  },
+  compareActionRowStacked: {
+    flexDirection: "column"
+  },
+  comparePairButtonSpacer: {
+    width: 14
+  },
+  compareStackedButtonSpacer: {
+    height: 12
+  },
+  compareActionButtonStacked: {
+    minHeight: 58
+  },
+  compareShareButton: {
+    flex: 1,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 64,
+    paddingHorizontal: 18,
+    paddingVertical: 16
+  },
+  compareShareButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    lineHeight: 20,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  compareSaveButton: {
+    flex: 1,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 64,
+    paddingHorizontal: 18,
+    paddingVertical: 16
+  },
+  compareSaveButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    lineHeight: 20,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   reelStage: {
     flex: 1,
@@ -1399,50 +2082,107 @@ const styles = StyleSheet.create({
   },
   reelVideoWrap: {
     marginTop: 6,
-    borderRadius: 20,
+    borderRadius: theme.shape.cardRadiusMd,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(241,233,222,0.95)",
     padding: 8
   },
   reelVideo: {
     width: "100%",
-    borderRadius: 14,
+    borderRadius: theme.shape.cardRadiusMd,
     overflow: "hidden",
-    backgroundColor: "#0b1a2d"
+    backgroundColor: "rgba(235,227,214,0.96)"
   },
   reelControlsWrap: {
     marginTop: 10
   },
+  reelMetaRow: {
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8
+  },
+  reelMetaPill: {
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.96)",
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 11,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label,
+    paddingHorizontal: 10,
+    paddingVertical: 5
+  },
+  reelMetaCopy: {
+    color: "#2a2a2a",
+    fontWeight: "700",
+    fontSize: 12
+  },
+  reelStatsCopy: {
+    marginTop: 2,
+    color: "#2a2a2a",
+    fontWeight: "700",
+    fontSize: 11
+  },
   reelIndicatorRow: {
+    marginTop: 8,
     flexDirection: "row",
     alignItems: "center",
     gap: 8
   },
+  reelActionRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    gap: 10
+  },
+  reelShareButton: {
+    flex: 1,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 58,
+    paddingHorizontal: 16,
+    paddingVertical: 14
+  },
+  reelShareButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    lineHeight: 20,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
   reelIndicatorShell: {
     flex: 1,
     height: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.24)",
+    borderRadius: 0,
+    backgroundColor: "rgba(0,0,0,0.16)",
     overflow: "hidden"
   },
   reelIndicatorFill: {
     width: "100%",
     height: "100%",
-    borderRadius: 999,
+    borderRadius: 0,
     opacity: 0.24,
-    backgroundColor: "#6ca8ff"
+    backgroundColor: "#4a4a4a"
   },
   reelIndicatorFillActive: {
     opacity: 1,
-    backgroundColor: "#0e63ff"
+    backgroundColor: theme.colors.accentStrong
   },
   reelContinueButton: {
-    marginTop: 12,
-    borderRadius: 999,
+    flex: 1,
+    borderRadius: theme.shape.pillRadius,
     borderWidth: 1,
-    borderColor: "rgba(118,184,255,0.58)",
-    backgroundColor: "rgba(10,86,219,0.9)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: theme.colors.accent,
     alignItems: "center",
     justifyContent: "center",
     minHeight: 58,
@@ -1450,17 +2190,32 @@ const styles = StyleSheet.create({
     paddingVertical: 15
   },
   reelContinueButtonText: {
-    color: "#f0f7ff",
+    color: "#101010",
     fontWeight: "800",
-    fontSize: 17,
+    fontSize: 16,
     lineHeight: 23,
-    letterSpacing: 0.2
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   reelExportMessage: {
     marginTop: 8,
-    color: "#b8cde6",
+    color: "#2a2a2a",
     fontWeight: "700",
     fontSize: 12
+  },
+  receiptButton: {
+    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    alignItems: "center",
+  },
+  receiptButtonText: {
+    color: "#2a2a2a",
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.15,
   },
   summaryStage: {
     flex: 1,
@@ -1475,24 +2230,24 @@ const styles = StyleSheet.create({
   },
   summaryHeroWrap: {
     width: "100%",
-    borderRadius: 24,
+    borderRadius: theme.shape.cardRadiusLg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
+    borderColor: "rgba(0,0,0,0.08)",
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.06)"
+    backgroundColor: "rgba(241,233,222,0.96)"
   },
   summaryHeroVideo: {
     width: "100%",
     height: "100%",
-    backgroundColor: "#0b1a2d"
+    backgroundColor: "rgba(235,227,214,0.96)"
   },
   summaryHeroFallback: {
     flex: 1,
-    backgroundColor: "rgba(255,255,255,0.08)"
+    backgroundColor: "rgba(235,227,214,0.96)"
   },
   summaryHeroShade: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(4,10,19,0.26)"
+    backgroundColor: "rgba(0,0,0,0.2)"
   },
   summaryHeroTextWrap: {
     position: "absolute",
@@ -1501,18 +2256,19 @@ const styles = StyleSheet.create({
     bottom: 14
   },
   summaryHeroKicker: {
-    color: "#d6e8ff",
+    color: "#2a2a2a",
     fontSize: 12,
     fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.6
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   summaryHeroTitle: {
     marginTop: 4,
-    color: "#f3f9ff",
+    color: "#101010",
     fontSize: 30,
     lineHeight: 34,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   summaryMetricsRow: {
     marginTop: 16,
@@ -1524,49 +2280,220 @@ const styles = StyleSheet.create({
   },
   summaryMetricPill: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: theme.shape.cardRadiusMd,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.28)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(241,233,222,0.96)",
     paddingHorizontal: 13,
     paddingVertical: 12
   },
   summaryMetricLabel: {
-    color: "#b8cde6",
+    color: "#2a2a2a",
     fontWeight: "700",
     fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 0.45
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   summaryMetricValue: {
     marginTop: 3,
-    color: "#eff7ff",
+    color: "#101010",
     fontWeight: "800",
     fontSize: 16
   },
-  summaryCopy: {
+  summaryStorylineHeadline: {
     marginTop: 14,
-    color: "#c6d8ef",
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  summaryCopy: {
+    marginTop: 7,
+    color: "#2a2a2a",
     fontWeight: "600",
     lineHeight: 20,
     fontSize: 14
   },
-  summaryExportButton: {
-    marginTop: 14,
-    borderRadius: 12,
+  summaryTrailerLine: {
+    marginTop: 5,
+    color: "#2a2a2a",
+    fontWeight: "700",
+    fontSize: 12
+  },
+  summaryReadyLine: {
+    marginTop: 3,
+    color: "#2a2a2a",
+    fontWeight: "700",
+    fontSize: 12
+  },
+  summaryNudgeLine: {
+    marginTop: 4,
+    color: "#2a2a2a",
+    fontWeight: "600",
+    fontSize: 12
+  },
+  summaryNudgeLineDone: {
+    color: theme.colors.success
+  },
+  quickShareCard: {
+    marginTop: 10,
+    borderRadius: theme.shape.cardRadiusMd,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.32)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(241,233,222,0.96)",
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  quickShareTitle: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13
+  },
+  quickShareCopy: {
+    marginTop: 3,
+    color: "#2a2a2a",
+    fontWeight: "600",
+    fontSize: 12
+  },
+  quickShareActionsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  quickShareButton: {
+    flex: 1,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: theme.colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: 12
+  },
+  quickShareButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
+  },
+  quickShareDismissButton: {
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: 12
+  },
+  quickShareDismissText: {
+    color: "#101010",
+    fontWeight: "700",
+    fontSize: 12,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
+  },
+  summaryRetryButton: {
+    marginTop: 10,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  summaryRetryButtonText: {
+    color: "#101010",
+    fontWeight: "700",
+    fontSize: 12,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
+  },
+  summaryExportActions: {
+    marginTop: 14,
+    gap: 10
+  },
+  summaryShareStateRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    gap: 8
+  },
+  summaryShareStatePill: {
+    flex: 1,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 30,
+    paddingHorizontal: 10
+  },
+  summaryShareStatePillDone: {
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(21,122,63,0.24)"
+  },
+  summaryShareStateText: {
+    color: "#2a2a2a",
+    fontWeight: "700",
+    fontSize: 11
+  },
+  summaryShareStateTextDone: {
+    color: "#0f4a28"
+  },
+  summaryExportButton: {
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
     alignItems: "center",
     justifyContent: "center",
     minHeight: 52,
     paddingHorizontal: 18,
     paddingVertical: 12
   },
+  summaryExportButtonDisabled: {
+    opacity: 0.66
+  },
   summaryExportButtonText: {
-    color: "#d7e9ff",
-    fontWeight: "700",
-    fontSize: 13
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
+  },
+  summarySaveButton: {
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: 18,
+    paddingVertical: 12
+  },
+  summarySaveButtonDone: {
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(21,122,63,0.24)"
+  },
+  summarySaveButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
+  },
+  summarySaveButtonTextDone: {
+    color: "#0f4a28"
   },
   nextChapterSummaryWrap: {
     marginTop: 16
@@ -1576,17 +2503,17 @@ const styles = StyleSheet.create({
   },
   nextChapterReason: {
     marginTop: 2,
-    color: "#9fb6d2",
+    color: "#2a2a2a",
     fontWeight: "600",
     fontSize: 12,
     lineHeight: 17
   },
   nextChapterOpenButton: {
     marginTop: 12,
-    borderRadius: 14,
+    borderRadius: theme.shape.buttonRadius,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.56)",
-    backgroundColor: "rgba(14,99,255,0.24)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.22)",
     alignItems: "center",
     justifyContent: "center",
     minHeight: 52,
@@ -1594,9 +2521,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12
   },
   nextChapterOpenButtonText: {
-    color: "#eaf4ff",
+    color: "#101010",
     fontWeight: "800",
-    fontSize: 15
+    fontSize: 14,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
   },
   nextChapterStage: {
     flex: 1,
@@ -1604,31 +2533,33 @@ const styles = StyleSheet.create({
     marginTop: 12
   },
   nextChapterStageTitle: {
-    color: "#eff7ff",
+    color: "#101010",
     fontWeight: "800",
     fontSize: 30,
-    lineHeight: 34
+    lineHeight: 34,
+    fontFamily: theme.typography.display
   },
   nextChapterStageSubtitle: {
     marginTop: 6,
-    color: "#b8cde6",
+    color: "#2a2a2a",
     fontWeight: "600",
-    lineHeight: 19
+    lineHeight: 19,
+    fontFamily: theme.typography.body
   },
   nextChapterCardsWrap: {
     marginTop: 12,
     gap: 10
   },
   nextChapterCard: {
-    borderRadius: 18,
+    borderRadius: theme.shape.cardRadiusMd,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(241,233,222,0.96)",
     padding: 12
   },
   nextChapterCardRecommended: {
-    borderColor: "rgba(88,177,255,0.76)",
-    backgroundColor: "rgba(14,99,255,0.22)"
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.22)"
   },
   nextChapterCardBusy: {
     opacity: 0.66
@@ -1640,47 +2571,50 @@ const styles = StyleSheet.create({
     gap: 8
   },
   nextChapterCardDays: {
-    color: "#c6d8ef",
+    color: "#2a2a2a",
     fontWeight: "800",
     fontSize: 13,
-    textTransform: "uppercase",
-    letterSpacing: 0.55
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   nextChapterCardDaysRecommended: {
-    color: "#eff7ff"
+    color: "#101010"
   },
   nextChapterRecommendedPill: {
-    color: "#d9ebff",
+    color: "#ea3d00",
     fontWeight: "800",
     fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 0.5
+    letterSpacing: 0.15,
+    fontFamily: theme.typography.label
   },
   nextChapterCardTitle: {
     marginTop: 4,
-    color: "#eff7ff",
+    color: "#101010",
     fontWeight: "800",
     fontSize: 22,
-    lineHeight: 25
+    lineHeight: 25,
+    fontFamily: theme.typography.display
   },
   nextChapterCardSubtitle: {
     marginTop: 2,
-    color: "#c6d8ef",
-    fontWeight: "700"
+    color: "#2a2a2a",
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   nextChapterCardPayoff: {
     marginTop: 6,
-    color: "#b8cde6",
+    color: "#2a2a2a",
     fontWeight: "600",
-    lineHeight: 18
+    lineHeight: 18,
+    fontFamily: theme.typography.body
   },
   nextChapterBackButton: {
     marginTop: 12,
     marginBottom: 8,
-    borderRadius: 14,
+    borderRadius: theme.shape.buttonRadius,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
     alignItems: "center",
     justifyContent: "center",
     minHeight: 50,
@@ -1688,22 +2622,24 @@ const styles = StyleSheet.create({
     paddingVertical: 11
   },
   nextChapterBackButtonText: {
-    color: "#d3e4f8",
-    fontWeight: "700",
-    fontSize: 14
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
   },
   chapterActionMessage: {
     marginTop: 10,
-    color: "#b8cde6",
+    color: "#2a2a2a",
     fontWeight: "700",
     fontSize: 12
   },
   summaryDoneButton: {
     marginTop: 14,
-    borderRadius: 14,
+    borderRadius: theme.shape.buttonRadius,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.32)",
-    backgroundColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
     alignItems: "center",
     justifyContent: "center",
     minHeight: 52,
@@ -1711,8 +2647,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12
   },
   summaryDoneButtonText: {
-    color: "#dcecff",
-    fontWeight: "700",
-    fontSize: 14
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 13,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.15
   }
 });

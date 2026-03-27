@@ -4,19 +4,23 @@ import { requireAuth } from "../auth/guard.js";
 import { getPool } from "../db/pool.js";
 import {
   archiveJourney,
+  completeJourneyWeeklyQuest,
   createJourney,
   findJourneyByIdForUser,
   listActiveJourneysByUser,
   listJourneyReveals,
+  listJourneyWeeklyQuestCompletions,
   startNextMilestoneChapter,
   updateJourney
 } from "./repository.js";
 
 const milestoneLengthOptions = new Set([7, 14, 30, 100]);
 const captureModeOptions = new Set(["video", "photo"] as const);
+const skillPackOptions = new Set(["fitness", "drawing", "instrument"] as const);
 
 type CreateJourneyBody = {
   title?: string;
+  skillPack?: "fitness" | "drawing" | "instrument";
   category?: string | null;
   colorTheme?: string | null;
   goalText?: string | null;
@@ -26,6 +30,7 @@ type CreateJourneyBody = {
 
 type UpdateJourneyBody = {
   title?: string;
+  skillPack?: "fitness" | "drawing" | "instrument";
   category?: string | null;
   colorTheme?: string | null;
   goalText?: string | null;
@@ -35,6 +40,12 @@ type UpdateJourneyBody = {
 
 type NextMilestoneBody = {
   milestoneLengthDays?: number;
+};
+
+type CompleteWeeklyQuestBody = {
+  weekKey?: string;
+  questId?: string;
+  rewardXp?: number;
 };
 
 type JourneyParams = {
@@ -102,6 +113,51 @@ function normalizeCaptureMode(value: unknown, { required }: { required: boolean 
   };
 }
 
+function normalizeSkillPack(value: unknown, { required }: { required: boolean }) {
+  if (value === undefined || value === null) {
+    if (required) return { error: "SKILL_PACK_REQUIRED" as const };
+    return { present: false as const };
+  }
+
+  if (typeof value !== "string") {
+    return { error: "INVALID_SKILL_PACK" as const };
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!skillPackOptions.has(normalized as "fitness" | "drawing" | "instrument")) {
+    return { error: "INVALID_SKILL_PACK" as const };
+  }
+
+  return {
+    present: true as const,
+    value: normalized as "fitness" | "drawing" | "instrument"
+  };
+}
+
+function normalizeWeekKey(value: unknown) {
+  if (typeof value !== "string") return { error: "WEEK_KEY_REQUIRED" as const };
+  const normalized = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}:\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return { error: "INVALID_WEEK_KEY" as const };
+  }
+  return { value: normalized };
+}
+
+function normalizeQuestId(value: unknown) {
+  if (typeof value !== "string") return { error: "QUEST_ID_REQUIRED" as const };
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 80) return { error: "INVALID_QUEST_ID" as const };
+  return { value: normalized };
+}
+
+function normalizeRewardXp(value: unknown) {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return { error: "INVALID_REWARD_XP" as const };
+  }
+  if (value < 0 || value > 5000) return { error: "INVALID_REWARD_XP" as const };
+  return { value };
+}
+
 export function registerJourneyRoutes(app: FastifyInstance) {
   app.get("/journeys", async (request, reply) => {
     const auth = await requireAuth(request, reply);
@@ -134,12 +190,16 @@ export function registerJourneyRoutes(app: FastifyInstance) {
     if ("error" in milestoneLength) return reply.code(400).send({ error: milestoneLength.error });
     const captureMode = normalizeCaptureMode(request.body?.captureMode, { required: false });
     if ("error" in captureMode) return reply.code(400).send({ error: captureMode.error });
+    const skillPack = normalizeSkillPack(request.body?.skillPack, { required: false });
+    if ("error" in skillPack) return reply.code(400).send({ error: skillPack.error });
     const resolvedCaptureMode = captureMode.present ? captureMode.value : "video";
+    const resolvedSkillPack = skillPack.present ? skillPack.value : "fitness";
 
     const pool = getPool();
     const journey = await createJourney(pool, {
       userId: auth.user.id,
       title: title.value,
+      skillPack: resolvedSkillPack,
       category: category.present ? category.value : null,
       colorTheme: colorTheme.present ? colorTheme.value : null,
       goalText: goalText.present ? goalText.value : null,
@@ -189,6 +249,60 @@ export function registerJourneyRoutes(app: FastifyInstance) {
     return reply.send({ reveals });
   });
 
+  app.get<{ Params: JourneyParams }>("/journeys/:journeyId/weekly-quests", async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+
+    const pool = getPool();
+    const journey = await findJourneyByIdForUser(pool, {
+      journeyId: request.params.journeyId,
+      userId: auth.user.id
+    });
+    if (!journey) {
+      return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
+    }
+
+    const quests = await listJourneyWeeklyQuestCompletions(pool, {
+      journeyId: request.params.journeyId,
+      userId: auth.user.id
+    });
+    return reply.send({ quests });
+  });
+
+  app.post<{ Params: JourneyParams; Body: CompleteWeeklyQuestBody }>(
+    "/journeys/:journeyId/weekly-quests/complete",
+    async (request, reply) => {
+      const auth = await requireAuth(request, reply);
+      if (!auth) return;
+
+      const weekKey = normalizeWeekKey(request.body?.weekKey);
+      if ("error" in weekKey) return reply.code(400).send({ error: weekKey.error });
+      const questId = normalizeQuestId(request.body?.questId);
+      if ("error" in questId) return reply.code(400).send({ error: questId.error });
+      const rewardXp = normalizeRewardXp(request.body?.rewardXp);
+      if ("error" in rewardXp) return reply.code(400).send({ error: rewardXp.error });
+
+      const pool = getPool();
+      const journey = await findJourneyByIdForUser(pool, {
+        journeyId: request.params.journeyId,
+        userId: auth.user.id
+      });
+      if (!journey) {
+        return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
+      }
+
+      const quest = await completeJourneyWeeklyQuest(pool, {
+        journeyId: request.params.journeyId,
+        userId: auth.user.id,
+        weekKey: weekKey.value,
+        questId: questId.value,
+        rewardXp: rewardXp.value
+      });
+
+      return reply.send({ quest });
+    }
+  );
+
   app.patch<{ Params: JourneyParams; Body: UpdateJourneyBody }>("/journeys/:journeyId", async (request, reply) => {
     const auth = await requireAuth(request, reply);
     if (!auth) return;
@@ -234,6 +348,12 @@ export function registerJourneyRoutes(app: FastifyInstance) {
     if ("error" in captureMode) return reply.code(400).send({ error: captureMode.error });
     if (captureMode.present) {
       updates.captureMode = captureMode.value;
+      hasUpdate = true;
+    }
+    const skillPack = normalizeSkillPack(request.body?.skillPack, { required: false });
+    if ("error" in skillPack) return reply.code(400).send({ error: skillPack.error });
+    if (skillPack.present) {
+      updates.skillPack = skillPack.value;
       hasUpdate = true;
     }
 

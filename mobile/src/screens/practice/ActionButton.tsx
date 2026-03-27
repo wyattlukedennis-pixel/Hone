@@ -15,6 +15,7 @@ type ActionButtonProps = {
   loadingLabel?: string;
   fullWidth?: boolean;
   dense?: boolean;
+  noTopMargin?: boolean;
 };
 
 export function ActionButton({
@@ -25,12 +26,13 @@ export function ActionButton({
   loading,
   loadingLabel,
   fullWidth,
-  dense = false
+  dense = false,
+  noTopMargin = false
 }: ActionButtonProps) {
   const reducedMotion = useReducedMotion();
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(1)).current;
-  const text = loading ? loadingLabel ?? "Working..." : label;
+  const text = loading ? loadingLabel ?? "working..." : label;
   const pressDisabled = Boolean(disabled || loading);
 
   function handlePressIn() {
@@ -43,7 +45,7 @@ export function ActionButton({
     const micro = Math.min(theme.motion.microMs, 75);
     Animated.parallel([
       Animated.timing(scale, {
-        toValue: 0.976,
+        toValue: 0.97,
         duration: micro,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true
@@ -94,6 +96,7 @@ export function ActionButton({
         style={[
           fullWidth ? styles.fullWidth : undefined,
           dense && fullWidth ? styles.fullWidthDense : undefined,
+          noTopMargin && fullWidth ? styles.fullWidthNoTopMargin : undefined,
           { transform: [{ scale }], opacity }
         ]}
       >
@@ -107,7 +110,7 @@ export function ActionButton({
           style={[styles.primaryAction, dense ? styles.primaryActionDense : undefined, pressDisabled ? styles.disabled : undefined]}
         >
           <LinearGradient
-            colors={["#2b78f2", "#0f5be0"]}
+            colors={theme.gradients.primaryAction}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={[styles.primaryActionFill, dense ? styles.primaryActionFillDense : undefined]}
@@ -124,6 +127,7 @@ export function ActionButton({
       style={[
         fullWidth ? styles.fullWidth : undefined,
         dense && fullWidth ? styles.fullWidthDense : undefined,
+        noTopMargin && fullWidth ? styles.fullWidthNoTopMargin : undefined,
         { transform: [{ scale }], opacity }
       ]}
     >
@@ -144,47 +148,51 @@ export function ActionButton({
 
 const styles = StyleSheet.create({
   primaryAction: {
-    borderRadius: 16,
-    borderWidth: 0,
-    borderColor: "transparent",
+    borderRadius: 24,
     overflow: "hidden",
-    shadowColor: "#0d4fbf",
-    shadowOpacity: 0.18,
+    shadowColor: theme.colors.accent,
+    shadowOpacity: 0.25,
     shadowRadius: 12,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 5
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4
   },
   primaryActionDense: {
     minHeight: 44
   },
   primaryActionFill: {
-    minHeight: 48,
-    paddingHorizontal: 18,
+    minHeight: 54,
+    paddingHorizontal: 22,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    borderWidth: 0
   },
   primaryActionFillDense: {
-    minHeight: 42
+    minHeight: 44
   },
   primaryActionText: {
-    color: "#edf5ff",
-    fontWeight: "800",
-    fontSize: 16
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 16,
+    letterSpacing: 0.2,
+    fontFamily: theme.typography.heading
   },
   primaryActionTextDense: {
     fontSize: 15
   },
   ghostAction: {
-    borderRadius: 15,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.66)",
-    backgroundColor: "rgba(245,251,255,0.42)",
-    paddingVertical: 11,
-    paddingHorizontal: 14
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(246,241,232,0.98)",
+    paddingVertical: 12,
+    paddingHorizontal: 17
   },
   ghostActionText: {
-    color: theme.colors.textSecondary,
-    fontWeight: "700"
+    color: theme.colors.textPrimary,
+    fontWeight: "700",
+    fontSize: 13,
+    letterSpacing: 0.2,
+    fontFamily: theme.typography.label
   },
   dangerAction: {
     borderColor: "rgba(214,69,93,0.42)",
@@ -195,10 +203,13 @@ const styles = StyleSheet.create({
   },
   fullWidth: {
     width: "100%",
-    marginTop: 16
+    marginTop: 14
   },
   fullWidthDense: {
     marginTop: 10
+  },
+  fullWidthNoTopMargin: {
+    marginTop: 0
   },
   disabled: {
     opacity: 0.65

@@ -1,9 +1,11 @@
 {
+  "main": "index.js",
   "expo": {
     "name": "Hone",
     "slug": "hone-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
+    "icon": "./src/assets/logo.png",
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
@@ -11,7 +13,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hone.mobile"
+      "bundleIdentifier": "com.hone.mobile",
+      "icon": "./src/assets/logo.png"
     },
     "android": {
       "package": "com.hone.mobile"

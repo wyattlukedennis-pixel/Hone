@@ -69,7 +69,12 @@ function mapClipUpload(row: ClipUploadRow): ClipUpload {
 }
 
 function normalizeRecordedOn(value: Date | string) {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    const year = value.getUTCFullYear();
+    const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
+    const day = `${value.getUTCDate()}`.padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
   return value.includes("T") ? value.slice(0, 10) : value;
 }
 

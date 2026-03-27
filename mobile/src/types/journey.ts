@@ -1,7 +1,10 @@
+export type SkillPack = "fitness" | "drawing" | "instrument";
+
 export type Journey = {
   id: string;
   userId: string;
   title: string;
+  skillPack: SkillPack;
   category: string | null;
   colorTheme: string | null;
   goalText: string | null;
@@ -29,6 +32,17 @@ export type JourneyReveal = {
   createdAt: string;
 };
 
+export type JourneyWeeklyQuestCompletion = {
+  id: string;
+  journeyId: string;
+  userId: string;
+  weekKey: string;
+  questId: string;
+  rewardXp: number;
+  completedAt: string;
+  createdAt: string;
+};
+
 export type JourneysResponse = {
   journeys: Journey[];
 };
@@ -45,4 +59,12 @@ export type NextMilestoneResponse = {
   journey: Journey;
   reveal: JourneyReveal;
   progressDays: number;
+};
+
+export type JourneyWeeklyQuestCompletionsResponse = {
+  quests: JourneyWeeklyQuestCompletion[];
+};
+
+export type JourneyWeeklyQuestCompletionResponse = {
+  quest: JourneyWeeklyQuestCompletion;
 };

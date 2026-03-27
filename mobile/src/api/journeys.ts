@@ -1,14 +1,36 @@
 import { requestJson } from "./http";
-import type { JourneyResponse, JourneysResponse, JourneyRevealsResponse, NextMilestoneResponse } from "../types/journey";
+import type {
+  JourneyResponse,
+  JourneysResponse,
+  JourneyRevealsResponse,
+  NextMilestoneResponse,
+  JourneyWeeklyQuestCompletionsResponse,
+  JourneyWeeklyQuestCompletionResponse
+} from "../types/journey";
+
+function normalizeJourney<T extends { skillPack?: unknown }>(journey: T): T & { skillPack: "fitness" | "drawing" | "instrument" } {
+  const skillPack = journey.skillPack;
+  if (skillPack === "fitness" || skillPack === "drawing" || skillPack === "instrument") {
+    return journey as T & { skillPack: "fitness" | "drawing" | "instrument" };
+  }
+  return {
+    ...journey,
+    skillPack: "fitness"
+  };
+}
 
 export function listJourneys(token: string) {
-  return requestJson<JourneysResponse>("/journeys", { token });
+  return requestJson<JourneysResponse>("/journeys", { token }).then((response) => ({
+    ...response,
+    journeys: response.journeys.map((journey) => normalizeJourney(journey))
+  }));
 }
 
 export function createJourney(
   token: string,
   payload: {
     title: string;
+    skillPack?: "fitness" | "drawing" | "instrument";
     category?: string | null;
     colorTheme?: string | null;
     goalText?: string | null;
@@ -20,7 +42,10 @@ export function createJourney(
     token,
     method: "POST",
     body: payload
-  });
+  }).then((response) => ({
+    ...response,
+    journey: normalizeJourney(response.journey)
+  }));
 }
 
 export function updateJourney(
@@ -28,6 +53,7 @@ export function updateJourney(
   journeyId: string,
   payload: {
     title?: string;
+    skillPack?: "fitness" | "drawing" | "instrument";
     category?: string | null;
     colorTheme?: string | null;
     goalText?: string | null;
@@ -39,7 +65,10 @@ export function updateJourney(
     token,
     method: "PATCH",
     body: payload
-  });
+  }).then((response) => ({
+    ...response,
+    journey: normalizeJourney(response.journey)
+  }));
 }
 
 export function archiveJourney(token: string, journeyId: string) {
@@ -60,6 +89,24 @@ export function startNextMilestone(token: string, journeyId: string, milestoneLe
     token,
     method: "POST",
     body: { milestoneLengthDays }
-  });
+  }).then((response) => ({
+    ...response,
+    journey: normalizeJourney(response.journey)
+  }));
 }
 
+export function listJourneyWeeklyQuests(token: string, journeyId: string) {
+  return requestJson<JourneyWeeklyQuestCompletionsResponse>(`/journeys/${journeyId}/weekly-quests`, { token });
+}
+
+export function completeJourneyWeeklyQuest(
+  token: string,
+  journeyId: string,
+  payload: { weekKey: string; questId: string; rewardXp: number }
+) {
+  return requestJson<JourneyWeeklyQuestCompletionResponse>(`/journeys/${journeyId}/weekly-quests/complete`, {
+    token,
+    method: "POST",
+    body: payload
+  });
+}

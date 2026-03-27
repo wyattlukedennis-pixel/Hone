@@ -12,6 +12,7 @@ import { GlassSurface } from "./components/GlassSurface";
 import { TabBar } from "./components/TabBar";
 import { TactilePressable } from "./components/TactilePressable";
 import { env } from "./env";
+import { identifyUser, initPurchases } from "./utils/purchases";
 import {
   addDailyMomentNotificationResponseListener,
   cancelDailyMomentNotification,
@@ -20,9 +21,11 @@ import {
 } from "./notifications/dailyMomentNotifications";
 import { AuthScreen } from "./screens/AuthScreen";
 import { JourneysScreen } from "./screens/JourneysScreen";
+import { OnboardingFlow } from "./screens/onboarding/OnboardingFlow";
 import { ProgressScreen } from "./screens/ProgressScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { clearActiveJourneyId, readActiveJourneyId, saveActiveJourneyId } from "./storage/activeJourneyStorage";
+import { readOnboardingComplete } from "./storage/onboardingStorage";
 import { clearAuthToken, readAuthToken, saveAuthToken } from "./storage/authStorage";
 import { getPendingClipUploadCount, processClipUploadQueue } from "./storage/clipUploadQueue";
 import { readDailyMomentSettings, saveDailyMomentSettings } from "./storage/dailyMomentStorage";
@@ -44,23 +47,31 @@ type SessionState = {
 
 function toAuthErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : "Unexpected error";
-  if (raw === "INVALID_CREDENTIALS") return "Email or password is incorrect.";
-  if (raw === "EMAIL_TAKEN") return "Email is already in use.";
-  if (raw === "PASSWORD_TOO_SHORT") return "Password must be at least 8 characters.";
-  if (raw === "INVALID_EMAIL") return "Enter a valid email address.";
+  if (raw === "INVALID_CREDENTIALS") return "email or password is incorrect.";
+  if (raw === "EMAIL_TAKEN") return "email is already in use.";
+  if (raw === "PASSWORD_TOO_SHORT") return "password must be at least 8 characters.";
+  if (raw === "INVALID_EMAIL") return "enter a valid email address.";
   if (raw.startsWith("Network request failed")) {
-    const host = env.apiBaseUrl.replace(/^https?:\/\//, "");
-    return `Cannot reach API (${host}). Set EXPO_PUBLIC_API_BASE_URL to your Mac LAN IP:4000 if needed.`;
+    return "can't reach the server. check your connection.";
   }
   return raw;
 }
 
 function BackgroundOrbs() {
+  const horizontalGuides = [94, 194, 294, 394, 494, 594, 694];
+  const verticalGuides = [56, 156, 256, 356];
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View style={styles.orbA} />
-      <View style={styles.orbB} />
-      <View style={styles.orbC} />
+      <View style={styles.fieldRing} />
+      <View style={styles.fieldStripeA} />
+      <View style={styles.fieldStripeB} />
+      <View style={styles.fieldStripeC} />
+      {horizontalGuides.map((top) => (
+        <View key={`h-${top}`} style={[styles.fieldGuideHorizontal, { top }]} />
+      ))}
+      {verticalGuides.map((left) => (
+        <View key={`v-${left}`} style={[styles.fieldGuideVertical, { left }]} />
+      ))}
     </View>
   );
 }
@@ -68,6 +79,7 @@ function BackgroundOrbs() {
 export default function App() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [session, setSession] = useState<SessionState | null>(null);
+  const [onboardingDone, setOnboardingDone] = useState(true); // default true to prevent flash
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -78,6 +90,8 @@ export default function App() {
   const [dailyMomentSettings, setDailyMomentSettings] = useState<DailyMomentSettings>(defaultDailyMomentSettings);
   const [hapticsMode, setHapticsMode] = useState<HapticsMode>(defaultHapticsMode);
   const [openRecorderSignal, setOpenRecorderSignal] = useState(0);
+  const [deepLinkRecorderSignal, setDeepLinkRecorderSignal] = useState(0);
+  const [deepLinkRecorderJourneyId, setDeepLinkRecorderJourneyId] = useState<string | null>(null);
   const [openRevealSignal, setOpenRevealSignal] = useState(0);
   const [progressEntrySignal, setProgressEntrySignal] = useState(0);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
@@ -92,18 +106,21 @@ export default function App() {
     trackEvent("app_opened", { appEnv: env.appEnv });
     async function bootstrapAuth() {
       try {
-        const [token, storedJourneyId, storedDevDateShift, storedDailyMoment, storedHapticsMode] = await Promise.all([
+        const [token, storedJourneyId, storedDevDateShift, storedDailyMoment, storedHapticsMode, , storedOnboardingDone] = await Promise.all([
           readAuthToken(),
           readActiveJourneyId(),
           __DEV__ ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings),
           readDailyMomentSettings(),
-          readHapticsMode()
+          readHapticsMode(),
+          initPurchases(),
+          readOnboardingComplete()
         ]);
         if (storedJourneyId) setActiveJourneyId(storedJourneyId);
         if (__DEV__) setDevDateShiftSettings(storedDevDateShift);
         setDailyMomentSettings(storedDailyMoment);
         setHapticsMode(storedHapticsMode);
         applyHapticsMode(storedHapticsMode);
+        setOnboardingDone(storedOnboardingDone);
         if (!token) return;
 
         const me = await fetchMe(token);
@@ -111,6 +128,7 @@ export default function App() {
           token,
           user: me.user
         });
+        void identifyUser(me.user.id);
       } catch {
         await clearAuthToken();
       } finally {
@@ -209,7 +227,7 @@ export default function App() {
       const email = values.email.trim().toLowerCase();
       const password = values.password;
       if (!email || !password) {
-        setAuthError("Email and password are required.");
+        setAuthError("email and password are required.");
         return;
       }
 
@@ -230,6 +248,7 @@ export default function App() {
         token: result.token,
         user: result.user
       });
+      void identifyUser(result.user.id);
       trackEvent(authMode === "signup" ? "signup_success" : "login_success", { userId: result.user.id });
       setTab("journeys");
     } catch (error) {
@@ -397,9 +416,8 @@ export default function App() {
     }
   }
 
-  const content = useMemo(() => {
-    if (tab === "journeys") {
-      return session ? (
+  const journeysContent = useMemo(() => {
+    return session ? (
         <JourneysScreen
           token={session.token}
           activeJourneyId={activeJourneyId}
@@ -419,13 +437,30 @@ export default function App() {
             void handleDevDateShiftSettingsChange(next);
           }}
           dailyMomentSettings={dailyMomentSettings}
+          onDailyMomentSettingsChange={(next) => {
+            void handleDailyMomentSettingsChange(next);
+          }}
           openRecorderSignal={openRecorderSignal}
+          deepLinkRecorderSignal={deepLinkRecorderSignal}
+          deepLinkRecorderJourneyId={deepLinkRecorderJourneyId}
           recordingsRevision={recordingsRevision}
+          onRecordingsRevisionBump={() => setRecordingsRevision((v) => v + 1)}
         />
       ) : null;
-    }
-    if (tab === "progress") {
-      return session ? (
+  }, [
+    session,
+    activeJourneyId,
+    mediaMode,
+    devDateShiftSettings,
+    dailyMomentSettings,
+    openRecorderSignal,
+    deepLinkRecorderSignal,
+    deepLinkRecorderJourneyId,
+    recordingsRevision
+  ]);
+
+  const progressContent = useMemo(() => {
+    return session ? (
         <ProgressScreen
           token={session.token}
           activeJourneyId={activeJourneyId}
@@ -433,14 +468,34 @@ export default function App() {
           onActiveJourneyChange={(journeyId) => {
             void handleActiveJourneyChange(journeyId);
           }}
-          onOpenJourneysTab={() => setTab("journeys")}
+          onOpenJourneysTab={(options) => {
+            if (options?.journeyId !== undefined) {
+              setDeepLinkRecorderJourneyId(options.journeyId ?? null);
+              void handleActiveJourneyChange(options.journeyId ?? null);
+            } else {
+              setDeepLinkRecorderJourneyId(activeJourneyId);
+            }
+            if (options?.openRecorder) {
+              setDeepLinkRecorderSignal((value) => value + 1);
+            }
+            setTab("journeys");
+          }}
           devNowDayOffset={devDateShiftSettings.enabled ? devDateShiftSettings.dayOffset : 0}
           openRevealSignal={openRevealSignal}
           progressEntrySignal={progressEntrySignal}
           recordingsRevision={recordingsRevision}
         />
       ) : null;
-    }
+  }, [
+    session,
+    activeJourneyId,
+    mediaMode,
+    openRevealSignal,
+    progressEntrySignal,
+    recordingsRevision
+  ]);
+
+  const settingsContent = useMemo(() => {
     return session ? (
       <SettingsScreen
         user={session.user}
@@ -463,17 +518,23 @@ export default function App() {
         }}
       />
     ) : null;
-  }, [tab, session, logoutLoading, activeJourneyId, mediaMode, devDateShiftSettings, dailyMomentSettings, hapticsMode, openRecorderSignal, openRevealSignal, progressEntrySignal, recordingsRevision]);
+  }, [
+    session,
+    logoutLoading,
+    devDateShiftSettings,
+    dailyMomentSettings,
+    hapticsMode
+  ]);
 
   return (
     <SafeAreaProvider>
-      <LinearGradient colors={[theme.colors.bgStart, theme.colors.bgEnd]} style={styles.app}>
+      <LinearGradient colors={theme.gradients.appBackground} style={styles.app}>
         <BackgroundOrbs />
         {isBootstrapping ? (
           <SafeAreaView style={styles.safeArea}>
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={theme.colors.accentStrong} />
-              <Text style={styles.loadingText}>Loading Hone...</Text>
+              <Text style={styles.loadingText}>loading hone...</Text>
             </View>
             <StatusBar style="dark" />
           </SafeAreaView>
@@ -481,8 +542,8 @@ export default function App() {
           <SafeAreaView style={styles.safeArea}>
             <View style={styles.topBar}>
               <View style={styles.topBarRow}>
-                {session ? (
-                  <GlassSurface style={styles.mediaModeSwitch} intensity={34}>
+                {false && (session ? (
+                  <GlassSurface style={styles.mediaModeSwitch} intensity={12}>
                     {(["video", "photo"] as const).map((mode) => {
                       const selected = mediaMode === mode;
                       return (
@@ -491,8 +552,25 @@ export default function App() {
                           style={[styles.mediaModeChip, selected ? styles.mediaModeChipSelected : undefined]}
                           onPress={() => setMediaMode(mode)}
                         >
+                          {selected ? (
+                            <LinearGradient
+                              pointerEvents="none"
+                              colors={theme.gradients.topControlActive}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.mediaModeChipActiveFill}
+                            />
+                          ) : (
+                            <LinearGradient
+                              pointerEvents="none"
+                              colors={theme.gradients.topControlGhost}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.mediaModeChipGhostFill}
+                            />
+                          )}
                           <Text style={[styles.mediaModeChipText, selected ? styles.mediaModeChipTextSelected : undefined]}>
-                            {mode === "video" ? "Video" : "Photo"}
+                            {mode === "video" ? "video" : "photo"}
                           </Text>
                         </TactilePressable>
                       );
@@ -500,10 +578,17 @@ export default function App() {
                   </GlassSurface>
                 ) : (
                   <View />
-                )}
+                ))}
                 {__DEV__ ? (
-                  <GlassSurface style={styles.devBadge} intensity={34}>
-                    <Text style={styles.devBadgeText}>DEV</Text>
+                  <GlassSurface style={styles.devBadge} intensity={10}>
+                    <LinearGradient
+                      pointerEvents="none"
+                      colors={theme.gradients.topControlGhost}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.devBadgeFill}
+                    />
+                    <Text style={styles.devBadgeText}>dev</Text>
                   </GlassSurface>
                 ) : null}
               </View>
@@ -518,14 +603,41 @@ export default function App() {
               ]}
             >
               {session ? (
-                content
-              ) : (
+                <>
+                  <View style={tab === "journeys" ? styles.tabVisible : styles.tabHidden}>
+                    {journeysContent}
+                  </View>
+                  <View style={tab === "progress" ? styles.tabVisible : styles.tabHidden}>
+                    {progressContent}
+                  </View>
+                  <View style={tab === "settings" ? styles.tabVisible : styles.tabHidden}>
+                    {settingsContent}
+                  </View>
+                </>
+              ) : onboardingDone ? (
                 <AuthScreen
                   mode={authMode}
                   loading={authLoading}
                   errorMessage={authError}
                   onModeChange={setAuthMode}
                   onSubmit={handleAuthSubmit}
+                />
+              ) : (
+                <OnboardingFlow
+                  onComplete={({ token, user }) => {
+                    setSession({ token, user });
+                    void listJourneys(token).then(({ journeys }) => {
+                      if (journeys.length > 0) {
+                        const firstJourney = journeys[0];
+                        setActiveJourneyId(firstJourney.id);
+                        void saveActiveJourneyId(firstJourney.id);
+                      }
+                    });
+                    setOnboardingDone(true);
+                  }}
+                  onSkipToLogin={() => {
+                    setOnboardingDone(true);
+                  }}
                 />
               )}
             </Animated.View>
@@ -542,13 +654,20 @@ const styles = StyleSheet.create({
   app: {
     flex: 1
   },
+  tabVisible: {
+    flex: 1,
+  },
+  tabHidden: {
+    flex: 1,
+    display: "none",
+  },
   safeArea: {
     flex: 1
   },
   topBar: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 2
+    paddingHorizontal: 18,
+    paddingTop: 6,
+    paddingBottom: 8
   },
   topBarRow: {
     flexDirection: "row",
@@ -558,42 +677,73 @@ const styles = StyleSheet.create({
   mediaModeSwitch: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderRadius: 999,
-    padding: 4
+    gap: 4,
+    borderRadius: 12,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(244,239,231,0.96)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
   },
   mediaModeChip: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    minHeight: 28,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 14,
+    minHeight: 32,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "hidden"
   },
   mediaModeChipSelected: {
-    backgroundColor: "rgba(255,255,255,0.74)"
+    borderColor: "rgba(0,0,0,0.12)"
+  },
+  mediaModeChipActiveFill: {
+    ...StyleSheet.absoluteFillObject
+  },
+  mediaModeChipGhostFill: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 1
   },
   mediaModeChipText: {
     fontSize: 12,
-    color: theme.colors.textSecondary,
-    fontWeight: "700"
+    color: "#111111",
+    fontWeight: "800",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   },
   mediaModeChipTextSelected: {
-    color: theme.colors.textPrimary
+    color: "#f7f2e8",
+    fontFamily: theme.typography.label
   },
   devBadge: {
     alignSelf: "flex-end",
-    borderRadius: 999,
-    minWidth: 40,
-    height: 28,
-    paddingHorizontal: 10,
+    borderRadius: 10,
+    minWidth: 58,
+    height: 32,
+    paddingHorizontal: 14,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(244,239,231,0.96)"
+  },
+  devBadgeFill: {
+    ...StyleSheet.absoluteFillObject
   },
   devBadgeText: {
-    fontSize: 11,
-    color: theme.colors.textSecondary,
+    fontSize: 10,
+    color: "#101010",
     fontWeight: "800",
-    letterSpacing: 0.6
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   },
   content: {
     flex: 1
@@ -606,33 +756,61 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: theme.colors.textSecondary,
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
-  orbA: {
+  fieldRing: {
     position: "absolute",
-    top: -72,
-    left: -30,
-    width: 132,
-    height: 132,
-    borderRadius: 66,
-    backgroundColor: "rgba(77,155,255,0.03)"
+    top: -44,
+    left: -64,
+    width: 288,
+    height: 288,
+    borderRadius: 144,
+    borderWidth: 18,
+    borderColor: theme.decor.field.ring
   },
-  orbB: {
+  fieldStripeA: {
     position: "absolute",
-    top: 228,
-    right: -52,
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    backgroundColor: "rgba(142,197,255,0.032)"
+    top: 212,
+    left: -76,
+    width: 340,
+    height: 72,
+    borderRadius: 0,
+    transform: [{ rotate: "-29deg" }],
+    backgroundColor: theme.decor.field.stripeA
   },
-  orbC: {
+  fieldStripeB: {
     position: "absolute",
-    bottom: 62,
-    left: -68,
-    width: 142,
-    height: 142,
-    borderRadius: 71,
-    backgroundColor: "rgba(224,244,255,0.045)"
+    top: 470,
+    right: -96,
+    width: 420,
+    height: 82,
+    borderRadius: 0,
+    transform: [{ rotate: "-17deg" }],
+    backgroundColor: theme.decor.field.stripeB
+  },
+  fieldStripeC: {
+    position: "absolute",
+    bottom: 136,
+    left: -46,
+    width: 312,
+    height: 64,
+    borderRadius: 0,
+    transform: [{ rotate: "-22deg" }],
+    backgroundColor: theme.decor.field.stripeC
+  },
+  fieldGuideHorizontal: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1.2,
+    backgroundColor: theme.decor.field.gridSoft
+  },
+  fieldGuideVertical: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1.2,
+    backgroundColor: theme.decor.field.gridStrong
   }
 });

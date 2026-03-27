@@ -21,6 +21,7 @@ export function toJourneyErrorMessage(error: unknown) {
   if (raw === "TITLE_TOO_LONG") return "Title must be 120 characters or fewer.";
   if (raw === "INVALID_MILESTONE_LENGTH") return "Choose 7, 14, 30, or 100 days.";
   if (raw === "MILESTONE_LENGTH_REQUIRED") return "Choose a milestone length.";
+  if (raw === "INVALID_SKILL_PACK") return "Choose a skill pack: Fitness, Drawing, or Instrument.";
   if (raw === "JOURNEY_NOT_FOUND") return "Journey no longer exists.";
   if (raw === "UPLOAD_NOT_READY") return "Upload is still processing. Please retry.";
   if (raw.startsWith("Network request failed")) return raw;
@@ -86,6 +87,12 @@ export function buildSaveMessage(dayCount: number, streak: number, unlockedMiles
 }
 
 export function buildSaveCelebration(dayCount: number, streak: number, unlockedMilestoneTitle: string | null) {
+  if (dayCount <= 1) {
+    return {
+      title: "day 1 locked in",
+      subtitle: "the worse this looks now, the better your reveal hits"
+    };
+  }
   const title = `Day ${dayCount} added`;
   if (unlockedMilestoneTitle) {
     return {

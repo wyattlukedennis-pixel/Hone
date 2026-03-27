@@ -20,8 +20,24 @@ type PracticeCalendarMiniProps = {
   milestoneLengthDays?: number;
   milestoneProgressDays?: number;
   revealReady?: boolean;
+  saveSignal?: number;
   onReRecordToday?: () => void;
 };
+
+function toLocalDayKey(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateFromDayKey(value: string) {
+  const [year, month, day] = value.split("-").map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
 
 export function PracticeCalendarMini({
   clips,
@@ -34,6 +50,7 @@ export function PracticeCalendarMini({
   milestoneLengthDays = 0,
   milestoneProgressDays = 0,
   revealReady = false,
+  saveSignal = 0,
   onReRecordToday
 }: PracticeCalendarMiniProps) {
   const insets = useSafeAreaInsets();
@@ -43,6 +60,48 @@ export function PracticeCalendarMini({
   const [activeDayKey, setActiveDayKey] = useState<string | null>(null);
   const [dayViewerClip, setDayViewerClip] = useState<Clip | null>(null);
   const [monthAnimating, setMonthAnimating] = useState(false);
+  const todayCellScale = useRef(new Animated.Value(1)).current;
+  const todayCellGlow = useRef(new Animated.Value(0)).current;
+
+  // Track initial value so we only animate on changes, not on mount
+  const saveSignalRef = useRef(saveSignal);
+  useEffect(() => {
+    if (saveSignal === saveSignalRef.current) return;
+    saveSignalRef.current = saveSignal;
+    const timer = setTimeout(() => {
+      // Big bounce + glow pulse
+      todayCellScale.setValue(0.4);
+      todayCellGlow.setValue(1);
+
+      Animated.sequence([
+        Animated.spring(todayCellScale, {
+          toValue: 1.4,
+          tension: 60,
+          friction: 4,
+          useNativeDriver: true,
+        }),
+        Animated.spring(todayCellScale, {
+          toValue: 0.9,
+          tension: 100,
+          friction: 6,
+          useNativeDriver: true,
+        }),
+        Animated.spring(todayCellScale, {
+          toValue: 1,
+          tension: 80,
+          friction: 8,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      Animated.timing(todayCellGlow, {
+        toValue: 0,
+        duration: 3000,
+        useNativeDriver: true,
+      }).start();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [saveSignal, todayCellScale, todayCellGlow]);
   const monthFade = useRef(new Animated.Value(1)).current;
   const monthTranslate = useRef(new Animated.Value(0)).current;
 
@@ -98,20 +157,20 @@ export function PracticeCalendarMini({
     const latestClip = clips.reduce((latest, clip) => (clip.recordedOn > latest.recordedOn ? clip : latest), clips[0]);
     return latestClip.recordedOn.slice(0, 10);
   }, [clips, revealReady]);
-  const todayKey = useMemo(() => new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())).toISOString().slice(0, 10), [now]);
+  const todayKey = useMemo(() => toLocalDayKey(now), [now]);
   const canGoNext = displayMonthStart.getTime() < currentMonthStart.getTime();
   const sceneMode = hero && scene;
-  const heroCellSize = sceneMode ? (compact ? 30 : 34) : 44;
-  const heroCellRadius = sceneMode ? 10 : 13;
+  const heroCellSize = sceneMode ? (compact ? 27 : 31) : 44;
+  const heroCellRadius = 8;
   const heroRowGap = sceneMode ? 6 : 9;
-  const heroNavSize = sceneMode ? 38 : 44;
-  const heroNavRadius = heroNavSize / 2;
-  const heroNavIconSize = sceneMode ? 20 : 24;
-  const heroMonthTitleSize = sceneMode ? 24 : 32;
-  const heroMonthTitleLineHeight = sceneMode ? 28 : 36;
-  const heroPaddingHorizontal = sceneMode ? 16 : 20;
-  const heroPaddingTop = sceneMode ? 12 : 15;
-  const heroPaddingBottom = sceneMode ? 12 : 16;
+  const heroNavSize = sceneMode ? 36 : 44;
+  const heroNavRadius = 8;
+  const heroNavIconSize = sceneMode ? 18 : 24;
+  const heroMonthTitleSize = sceneMode ? 21 : 32;
+  const heroMonthTitleLineHeight = sceneMode ? 25 : 36;
+  const heroPaddingHorizontal = sceneMode ? 15 : 20;
+  const heroPaddingTop = sceneMode ? 10 : 15;
+  const heroPaddingBottom = sceneMode ? 10 : 16;
 
   const monthCells = useMemo(() => {
     const year = displayMonthStart.getFullYear();
@@ -125,14 +184,18 @@ export function PracticeCalendarMini({
       if (day < 1 || day > daysInMonth) {
         return { key: `empty-${index}`, day: null, dateKey: null };
       }
-      const dateKey = new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+      const dateKey = toLocalDayKey(new Date(year, month, day));
       return { key: dateKey, day, dateKey };
     });
   }, [displayMonthStart, sceneMode]);
 
   const weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"];
   const dayViewerDateLabel = dayViewerClip
-    ? new Date(dayViewerClip.recordedOn).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+    ? (dateFromDayKey(dayViewerClip.recordedOn.slice(0, 10)) ?? new Date(dayViewerClip.recordedAt)).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric"
+      })
     : "";
   const dayViewerDayNumber = dayViewerClip
     ? Math.max(1, new Set(clips.filter((clip) => clip.recordedOn <= dayViewerClip.recordedOn).map((clip) => clip.recordedOn.slice(0, 10))).size)
@@ -196,7 +259,7 @@ export function PracticeCalendarMini({
       >
         {hero ? (
           <LinearGradient
-            colors={["rgba(242,250,255,0.96)", "rgba(188,210,241,0.9)"]}
+            colors={sceneMode ? theme.gradients.calendarHeroScene : theme.gradients.calendarHero}
             style={[
               styles.heroGradient,
               fill ? styles.heroGradientFill : undefined,
@@ -208,13 +271,22 @@ export function PracticeCalendarMini({
               }
             ]}
           >
-            <View style={styles.heroHeaderRow}>
+            {sceneMode ? <View style={styles.sceneSignalRail} /> : null}
+            <View style={[styles.heroHeaderRow, sceneMode ? styles.heroHeaderRowScene : undefined]}>
               <View>
-                <Text style={[styles.heroTitle, { fontSize: heroMonthTitleSize, lineHeight: heroMonthTitleLineHeight }]}>{monthLabel}</Text>
+                <Text
+                  style={[
+                    styles.heroTitle,
+                    sceneMode ? styles.heroTitleScene : undefined,
+                    { fontSize: heroMonthTitleSize, lineHeight: heroMonthTitleLineHeight }
+                  ]}
+                >
+                  {monthLabel}
+                </Text>
               </View>
               {progressLabel ? (
-                <View style={styles.heroProgressPill}>
-                  <Text style={styles.heroProgressPillText}>{progressLabel}</Text>
+                <View style={[styles.heroProgressPill, sceneMode ? styles.heroProgressPillScene : undefined]}>
+                  <Text style={[styles.heroProgressPillText, sceneMode ? styles.heroProgressPillTextScene : undefined]}>{progressLabel}</Text>
                 </View>
               ) : null}
             </View>
@@ -223,6 +295,7 @@ export function PracticeCalendarMini({
               <TactilePressable
                 style={[
                   styles.monthArrowButton,
+                  sceneMode ? styles.monthArrowButtonScene : undefined,
                   sceneMode ? { width: heroNavSize, height: heroNavSize, borderRadius: heroNavRadius } : undefined,
                   monthAnimating ? styles.monthArrowButtonDisabled : undefined
                 ]}
@@ -232,12 +305,21 @@ export function PracticeCalendarMini({
                 accessibilityRole="button"
                 accessibilityLabel="Previous month"
               >
-                <Text style={[styles.monthArrowText, { fontSize: heroNavIconSize, lineHeight: heroNavIconSize }]}>{"‹"}</Text>
+                <Text
+                  style={[
+                    styles.monthArrowText,
+                    sceneMode ? styles.monthArrowTextScene : undefined,
+                    { fontSize: heroNavIconSize, lineHeight: heroNavIconSize }
+                  ]}
+                >
+                  {"‹"}
+                </Text>
               </TactilePressable>
               <View style={styles.monthNavSpacer} />
               <TactilePressable
                 style={[
                   styles.monthArrowButton,
+                  sceneMode ? styles.monthArrowButtonScene : undefined,
                   sceneMode ? { width: heroNavSize, height: heroNavSize, borderRadius: heroNavRadius } : undefined,
                   !canGoNext || monthAnimating ? styles.monthArrowButtonDisabled : undefined
                 ]}
@@ -247,7 +329,14 @@ export function PracticeCalendarMini({
                 accessibilityRole="button"
                 accessibilityLabel="Next month"
               >
-                <Text style={[styles.monthArrowText, { fontSize: heroNavIconSize, lineHeight: heroNavIconSize }, !canGoNext ? styles.monthArrowTextDisabled : undefined]}>
+                <Text
+                  style={[
+                    styles.monthArrowText,
+                    sceneMode ? styles.monthArrowTextScene : undefined,
+                    { fontSize: heroNavIconSize, lineHeight: heroNavIconSize },
+                    !canGoNext ? styles.monthArrowTextDisabled : undefined
+                  ]}
+                >
                   {"›"}
                 </Text>
               </TactilePressable>
@@ -256,7 +345,7 @@ export function PracticeCalendarMini({
             <Animated.View style={{ opacity: monthFade, transform: [{ translateX: monthTranslate }] }}>
               <View style={[styles.weekdayRow, fill ? styles.weekdayRowFill : undefined, sceneMode ? styles.weekdayRowScene : undefined]}>
                 {weekdayLabels.map((label, index) => (
-                  <Text key={`${label}-${index}`} style={[styles.weekdayLabel, { width: heroCellSize }]}>
+                  <Text key={`${label}-${index}`} style={[styles.weekdayLabel, sceneMode ? styles.weekdayLabelScene : undefined, { width: heroCellSize }]}>
                     {label}
                   </Text>
                 ))}
@@ -288,7 +377,7 @@ export function PracticeCalendarMini({
                       const isToday = cell.dateKey === todayKey;
                       const isRevealDay = revealDayKey === cell.dateKey;
                       const canOpenDay = isToday && Boolean(clipByDayKey.get(todayKey));
-                      return (
+                      const heroCellEl = (
                         <TactilePressable
                           key={cell.key}
                           pressScale={0.94}
@@ -303,22 +392,62 @@ export function PracticeCalendarMini({
                           }}
                           style={[
                             styles.cellHero,
+                            sceneMode ? styles.cellHeroScene : undefined,
                             {
                               width: heroCellSize,
                               height: heroCellSize,
                               borderRadius: heroCellRadius
                             },
                             practiced ? (hasPhoto ? styles.cellDoneHeroPhoto : styles.cellDoneHero) : styles.cellEmptyHero,
+                            !practiced && sceneMode ? styles.cellEmptyHeroScene : undefined,
+                            practiced && !hasPhoto && sceneMode ? styles.cellDoneHeroScene : undefined,
+                            practiced && hasPhoto && sceneMode ? styles.cellDoneHeroPhotoScene : undefined,
                             isRevealDay ? styles.cellRevealHero : undefined,
+                            isRevealDay && sceneMode ? styles.cellRevealHeroScene : undefined,
                             isToday ? styles.cellTodayHero : undefined,
+                            isToday && sceneMode ? styles.cellTodayHeroScene : undefined,
                             activeDayKey === cell.dateKey ? styles.cellActiveHero : undefined
                           ]}
                         >
-                          <Text style={[styles.cellDayText, practiced ? styles.cellDayTextDone : undefined, isRevealDay ? styles.cellDayTextReveal : undefined]}>
+                          <Text
+                            style={[
+                              styles.cellDayText,
+                              sceneMode ? styles.cellDayTextScene : undefined,
+                              practiced ? styles.cellDayTextDone : undefined,
+                              practiced && sceneMode ? styles.cellDayTextDoneScene : undefined,
+                              isRevealDay ? styles.cellDayTextReveal : undefined
+                            ]}
+                          >
                             {cell.day}
                           </Text>
                         </TactilePressable>
                       );
+                      if (isToday) {
+                        return (
+                          <Animated.View
+                            key={cell.key}
+                            style={{
+                              transform: [{ scale: todayCellScale }],
+                            }}
+                          >
+                            {/* Outer glow */}
+                            <Animated.View
+                              style={{
+                                position: "absolute",
+                                top: -4,
+                                left: -4,
+                                right: -4,
+                                bottom: -4,
+                                borderRadius: heroCellRadius + 4,
+                                backgroundColor: "#E8450A",
+                                opacity: todayCellGlow,
+                              }}
+                            />
+                            {heroCellEl}
+                          </Animated.View>
+                        );
+                      }
+                      return heroCellEl;
                     })}
                   </View>
                 ))}
@@ -327,7 +456,7 @@ export function PracticeCalendarMini({
           </LinearGradient>
         ) : (
           <>
-            <Text style={styles.title}>Practice Calendar</Text>
+            <Text style={styles.title}>practice calendar</Text>
             <View style={styles.monthNavRowCompact}>
               <TactilePressable
                 style={[styles.monthArrowButtonCompact, monthAnimating ? styles.monthArrowButtonDisabled : undefined]}
@@ -351,7 +480,7 @@ export function PracticeCalendarMini({
                 <Text style={[styles.monthArrowTextCompact, !canGoNext ? styles.monthArrowTextDisabled : undefined]}>{"›"}</Text>
               </TactilePressable>
             </View>
-            {!compact ? <Text style={styles.subtitle}>Month view</Text> : null}
+            {!compact ? <Text style={styles.subtitle}>month view</Text> : null}
 
             <Animated.View style={{ opacity: monthFade, transform: [{ translateX: monthTranslate }] }}>
               <View style={styles.grid}>
@@ -366,7 +495,7 @@ export function PracticeCalendarMini({
                       const practiced = practicedDayKeys.has(cell.dateKey);
                       const isToday = cell.dateKey === todayKey;
                       const canOpenDay = isToday && Boolean(clipByDayKey.get(todayKey));
-                      return (
+                      const cellContent = (
                         <TactilePressable
                           key={cell.key}
                           pressScale={0.94}
@@ -390,6 +519,31 @@ export function PracticeCalendarMini({
                           {!compact ? <Text style={[styles.cellDayTextSmall, practiced ? styles.cellDayTextDone : undefined]}>{cell.day}</Text> : null}
                         </TactilePressable>
                       );
+                      if (isToday) {
+                        return (
+                          <Animated.View
+                            key={cell.key}
+                            style={{
+                              transform: [{ scale: todayCellScale }],
+                            }}
+                          >
+                            <Animated.View
+                              style={{
+                                position: "absolute",
+                                top: -3,
+                                left: -3,
+                                right: -3,
+                                bottom: -3,
+                                borderRadius: 12,
+                                backgroundColor: "#E8450A",
+                                opacity: todayCellGlow,
+                              }}
+                            />
+                            {cellContent}
+                          </Animated.View>
+                        );
+                      }
+                      return cellContent;
                     })}
                   </View>
                 ))}
@@ -404,12 +558,12 @@ export function PracticeCalendarMini({
           <View style={[styles.dayModalCard, { paddingTop: Math.max(12, insets.top + 2), paddingBottom: Math.max(16, insets.bottom + 10) }]}>
             <View style={styles.dayModalHeader}>
               <View style={styles.dayModalHeaderCopy}>
-                <Text style={styles.dayModalEyebrow}>Chapter Day</Text>
-                <Text style={styles.dayModalTitle}>{dayViewerDayNumber ? `Day ${dayViewerDayNumber}` : "Today's Practice"}</Text>
+                <Text style={styles.dayModalEyebrow}>chapter day</Text>
+                <Text style={styles.dayModalTitle}>{dayViewerDayNumber ? `day ${dayViewerDayNumber}` : "today's practice"}</Text>
                 <Text style={styles.dayModalDate}>{dayViewerDateLabel}</Text>
               </View>
               <TactilePressable style={styles.dayModalClose} onPress={() => setDayViewerClip(null)}>
-                <Text style={styles.dayModalCloseText}>Done</Text>
+                <Text style={styles.dayModalCloseText}>done</Text>
               </TactilePressable>
             </View>
 
@@ -439,7 +593,7 @@ export function PracticeCalendarMini({
                   onReRecordToday();
                 }}
               >
-                <Text style={styles.dayModalPrimaryActionText}>Re-record Today</Text>
+                <Text style={styles.dayModalPrimaryActionText}>re-record today</Text>
               </TactilePressable>
             ) : null}
           </View>
@@ -451,7 +605,7 @@ export function PracticeCalendarMini({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 20,
+    borderRadius: 80,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.88)",
     backgroundColor: "rgba(255,255,255,0.46)",
@@ -467,15 +621,17 @@ const styles = StyleSheet.create({
   },
   cardHero: {
     padding: 0,
-    borderRadius: 28,
+    borderRadius: theme.shape.cardRadiusLg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.7)",
+    borderColor: "rgba(0,0,0,0.06)",
     backgroundColor: "transparent",
     overflow: "hidden",
     minHeight: 0,
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 }
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
   },
   cardHeroFill: {
     flex: 1,
@@ -483,26 +639,34 @@ const styles = StyleSheet.create({
   },
   cardHeroScene: {
     minHeight: 0,
-    borderRadius: 24,
-    borderColor: "rgba(255,255,255,0.76)",
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 7
+    borderRadius: theme.shape.cardRadiusMd,
+    borderColor: "rgba(0,0,0,0.06)",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
   },
   cardHeroCompact: {
     minHeight: 0
   },
   heroGradient: {
     paddingHorizontal: 20,
-    paddingTop: 15,
-    paddingBottom: 16
+    paddingTop: 14,
+    paddingBottom: 15
   },
   heroGradientFill: {
     flex: 1
   },
   heroGradientScene: {
-    flexShrink: 1
+    flexShrink: 1,
+    borderWidth: 0
+  },
+  sceneSignalRail: {
+    width: 68,
+    height: 4,
+    borderRadius: 0,
+    marginBottom: 8,
+    backgroundColor: "#ff5a1f"
   },
   heroHeaderRow: {
     flexDirection: "row",
@@ -510,11 +674,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10
   },
+  heroHeaderRowScene: {
+    alignItems: "center"
+  },
   heroTitle: {
     color: theme.colors.textPrimary,
     fontSize: 32,
     lineHeight: 36,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
+  },
+  heroTitleScene: {
+    color: theme.colors.textPrimary
   },
   heroSubtitle: {
     marginTop: 3,
@@ -523,20 +694,30 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   heroProgressPill: {
-    borderRadius: 999,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.44)",
-    backgroundColor: "rgba(247,251,255,0.82)",
-    paddingHorizontal: 12,
-    paddingVertical: 7
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(238,230,219,0.95)",
+    paddingHorizontal: 13,
+    paddingVertical: 8
+  },
+  heroProgressPillScene: {
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(238,230,219,0.95)"
   },
   heroProgressPillText: {
     color: theme.colors.accentStrong,
     fontSize: 12,
-    fontWeight: "800"
+    fontWeight: "800",
+    letterSpacing: 0.3,
+
+    fontFamily: theme.typography.label
+  },
+  heroProgressPillTextScene: {
+    color: theme.colors.accentStrong
   },
   weekdayRow: {
-    marginTop: 10,
+    marginTop: 11,
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 1
@@ -550,13 +731,18 @@ const styles = StyleSheet.create({
   weekdayLabel: {
     width: 44,
     textAlign: "center",
-    color: theme.colors.textSecondary,
-    fontSize: 11,
+    color: "#252525",
+    fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.5
+    letterSpacing: 0.3,
+
+    fontFamily: theme.typography.label
+  },
+  weekdayLabelScene: {
+    color: theme.colors.textSecondary
   },
   gridHero: {
-    marginTop: 10,
+    marginTop: 12,
     gap: 9
   },
   gridHeroFill: {
@@ -571,65 +757,89 @@ const styles = StyleSheet.create({
   cellHero: {
     width: 44,
     height: 44,
-    borderRadius: 13,
+    borderRadius: 8,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center"
   },
+  cellHeroScene: {
+    borderWidth: 1
+  },
   cellEmptyHero: {
-    borderColor: "rgba(255,255,255,0.62)",
-    backgroundColor: "rgba(248,252,255,0.3)"
+    borderColor: "#c4b9a8",
+    backgroundColor: "rgba(241,234,223,0.74)"
+  },
+  cellEmptyHeroScene: {
+    borderColor: "#bcb09f",
+    backgroundColor: "rgba(239,231,220,0.95)"
   },
   cellDoneHero: {
-    borderColor: "rgba(14,99,255,0.8)",
-    backgroundColor: "rgba(84,149,255,0.82)",
-    shadowColor: "#2e73ea",
-    shadowOpacity: 0.32,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 4
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(255,90,31,0.88)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
+  },
+  cellDoneHeroScene: {
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(255,90,31,0.9)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16
   },
   cellDoneHeroPhoto: {
-    borderColor: "rgba(24,166,122,0.86)",
-    backgroundColor: "rgba(70,185,145,0.8)",
-    shadowColor: "#1f8f66",
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 4
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(41,41,41,0.84)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
+  },
+  cellDoneHeroPhotoScene: {
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(41,41,41,0.88)"
   },
   cellDoneHeroDual: {
-    borderColor: "rgba(255,255,255,0.95)",
-    borderWidth: 1.8,
-    backgroundColor: "rgba(14,99,255,0.92)",
-    shadowColor: "#0e63ff",
-    shadowOpacity: 0.38,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 5
+    borderColor: "rgba(232,69,10,0.3)",
+    borderWidth: 1,
+    backgroundColor: "#131313",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
   },
   cellPartialHero: {
-    borderColor: "rgba(255,255,255,0.76)",
-    backgroundColor: "rgba(24,166,122,0.16)"
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(41,41,41,0.14)"
   },
   cellRevealHero: {
-    borderColor: "rgba(255,255,255,0.98)",
-    borderWidth: 2,
-    backgroundColor: "rgba(11,90,232,0.94)",
-    shadowColor: "#0e63ff",
-    shadowOpacity: 0.42,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6
+    borderColor: "rgba(0,0,0,0.06)",
+    borderWidth: 1,
+    backgroundColor: "#131313",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
+  },
+  cellRevealHeroScene: {
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "#131313"
   },
   cellTodayHero: {
-    borderColor: "rgba(255,255,255,0.97)",
-    borderWidth: 1.8
+    borderColor: "rgba(0,0,0,0.06)",
+    borderWidth: 1
+  },
+  cellTodayHeroScene: {
+    borderColor: "rgba(0,0,0,0.06)"
   },
   cellActiveHero: {
-    transform: [{ scale: 1.03 }],
-    shadowOpacity: 0.26,
-    shadowRadius: 11
+    transform: [{ scale: 1.05 }],
+    shadowOpacity: 0.3,
+    shadowRadius: 12
   },
   heroFooterRow: {
     marginTop: 12,
@@ -667,8 +877,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between"
   },
   monthNavRowScene: {
-    marginTop: 8,
-    marginBottom: 6
+    marginTop: 5,
+    marginBottom: 4
   },
   trackLegendRow: {
     marginTop: 2,
@@ -688,19 +898,19 @@ const styles = StyleSheet.create({
     borderRadius: 4
   },
   trackLegendDotVideo: {
-    backgroundColor: "rgba(14,99,255,0.92)"
+    backgroundColor: "#ff5a1f"
   },
   trackLegendDotPhoto: {
-    backgroundColor: "rgba(24,166,122,0.92)"
+    backgroundColor: "#2a2a2a"
   },
   trackLegendText: {
-    color: "rgba(20,58,96,0.78)",
+    color: "#2d2d2d",
     fontSize: 11,
     fontWeight: "700"
   },
   trackLegendRule: {
     marginLeft: "auto",
-    color: "rgba(20,58,96,0.72)",
+    color: "#2d2d2d",
     fontSize: 11,
     fontWeight: "700"
   },
@@ -716,36 +926,45 @@ const styles = StyleSheet.create({
   monthArrowButton: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.74)",
-    backgroundColor: "rgba(244,250,255,0.66)",
-    shadowColor: "#0f2f5f",
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 5
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(240,232,222,0.98)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 0
+  },
+  monthArrowButtonScene: {
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(240,232,222,0.98)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.16
   },
   monthArrowButtonCompact: {
     width: 28,
     height: 28,
-    borderRadius: 14,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.62)",
-    backgroundColor: "rgba(255,255,255,0.18)"
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(240,232,222,0.98)"
   },
   monthArrowButtonDisabled: {
     opacity: 0.45
   },
   monthArrowText: {
-    color: theme.colors.textPrimary,
-    fontSize: 24,
+    color: "#101010",
+    fontSize: 21,
     fontWeight: "800",
-    lineHeight: 24
+    lineHeight: 22
+  },
+  monthArrowTextScene: {
+    color: theme.colors.textPrimary
   },
   monthArrowTextCompact: {
     color: theme.colors.textPrimary,
@@ -758,21 +977,23 @@ const styles = StyleSheet.create({
   },
   monthLabel: {
     color: theme.colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "800"
+    fontSize: 21,
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   monthLabelWrap: {
-    borderRadius: 14,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.68)",
-    backgroundColor: "rgba(255,255,255,0.26)",
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(239,231,220,0.96)",
     paddingHorizontal: 14,
     paddingVertical: 5
   },
   monthLabelCompact: {
     color: theme.colors.textPrimary,
     fontSize: 15,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   grid: {
     marginTop: 10,
@@ -793,39 +1014,39 @@ const styles = StyleSheet.create({
   cellCompact: {
     width: 27,
     height: 27,
-    borderRadius: 6
+    borderRadius: 8
   },
   cellGhost: {
     backgroundColor: "transparent",
     borderColor: "transparent"
   },
   cellEmpty: {
-    borderColor: "rgba(255,255,255,0.34)",
-    backgroundColor: "rgba(255,255,255,0.12)"
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(241,233,222,0.9)"
   },
   cellDone: {
-    borderColor: "rgba(14,99,255,0.58)",
-    backgroundColor: "rgba(14,99,255,0.28)"
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(255,90,31,0.32)"
   },
   cellDonePhoto: {
-    borderColor: "rgba(24,166,122,0.62)",
-    backgroundColor: "rgba(24,166,122,0.26)"
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "rgba(41,41,41,0.3)"
   },
   cellDoneDual: {
-    borderColor: "rgba(255,255,255,0.9)",
-    backgroundColor: "rgba(14,99,255,0.62)"
+    borderColor: "rgba(232,69,10,0.3)",
+    backgroundColor: "#161616"
   },
   cellPartial: {
-    borderColor: "rgba(255,255,255,0.62)",
-    backgroundColor: "rgba(24,166,122,0.12)"
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(41,41,41,0.14)"
   },
   cellToday: {
-    borderColor: "rgba(255,255,255,0.88)",
-    borderWidth: 1.4
+    borderColor: "rgba(0,0,0,0.06)",
+    borderWidth: 1
   },
   cellActive: {
-    borderColor: "rgba(14,99,255,0.86)",
-    backgroundColor: "rgba(14,99,255,0.34)"
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(255,90,31,0.28)"
   },
   cellHeroGhost: {
     width: 44,
@@ -833,13 +1054,18 @@ const styles = StyleSheet.create({
   },
   cellHeroGhostScene: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    backgroundColor: "rgba(255,255,255,0.06)"
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,222,0.92)"
   },
   cellDayText: {
+    color: "#2a2a2a",
+    fontSize: 15,
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
+  },
+  cellDayTextScene: {
     color: theme.colors.textSecondary,
-    fontSize: 16,
-    fontWeight: "800"
+    fontFamily: theme.typography.heading
   },
   cellDayTextSmall: {
     color: theme.colors.textSecondary,
@@ -847,11 +1073,14 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   cellDayTextDone: {
-    color: "#eef5ff",
+    color: "#f4efe6",
     fontWeight: "800"
   },
+  cellDayTextDoneScene: {
+    color: "#f4efe6"
+  },
   cellDayTextReveal: {
-    color: "#ffffff",
+    color: "#f4efe6",
     fontWeight: "900"
   },
   trackDotRow: {
@@ -874,16 +1103,16 @@ const styles = StyleSheet.create({
     borderRadius: 2.5
   },
   trackDotVideo: {
-    backgroundColor: "#d9eaff"
+    backgroundColor: "#ff5a1f"
   },
   trackDotPhoto: {
-    backgroundColor: "#dcffef"
+    backgroundColor: "#2a2a2a"
   },
   trackDotVideoCompact: {
-    backgroundColor: "rgba(14,99,255,0.92)"
+    backgroundColor: "#ff5a1f"
   },
   trackDotPhotoCompact: {
-    backgroundColor: "rgba(24,166,122,0.92)"
+    backgroundColor: "#2a2a2a"
   },
   dayModalOverlay: {
     flex: 1,
@@ -908,15 +1137,17 @@ const styles = StyleSheet.create({
     color: "rgba(198,219,244,0.9)",
     fontSize: 11,
     fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.62
+
+    letterSpacing: 0.3,
+    fontFamily: theme.typography.label
   },
   dayModalTitle: {
     marginTop: 4,
     color: "#eef5ff",
     fontSize: 30,
     lineHeight: 34,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   dayModalDate: {
     marginTop: 2,
@@ -940,7 +1171,7 @@ const styles = StyleSheet.create({
   dayModalVideoWrap: {
     marginTop: 14,
     marginHorizontal: 16,
-    borderRadius: 26,
+    borderRadius: 86,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
     backgroundColor: "rgba(255,255,255,0.04)",
@@ -970,6 +1201,9 @@ const styles = StyleSheet.create({
   dayModalPrimaryActionText: {
     color: "#ecf5ff",
     fontSize: 16,
-    fontWeight: "800"
+    fontWeight: "800",
+    letterSpacing: 0.44,
+
+    fontFamily: theme.typography.heading
   }
 });

@@ -45,7 +45,10 @@ export function PracticeHeatmapCard({ heatmapWeeks, dayCount }: PracticeHeatmapC
 const styles = StyleSheet.create({
   heatmapCard: {
     marginTop: 14,
-    borderRadius: 22,
+    borderRadius: theme.shape.cardRadiusLg,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     padding: 14
   },
   heatmapHeader: {
@@ -57,12 +60,16 @@ const styles = StyleSheet.create({
   heatmapTitle: {
     color: theme.colors.textPrimary,
     fontSize: 20,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   heatmapMeta: {
     color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "800",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.9,
+    fontFamily: theme.typography.label
   },
   heatmapGrid: {
     marginTop: 10,
@@ -75,18 +82,18 @@ const styles = StyleSheet.create({
   heatmapCell: {
     width: 12,
     height: 12,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.34)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.42)"
+    borderRadius: 0,
+    backgroundColor: "rgba(241,233,221,0.96)",
+    borderWidth: 1.5,
+    borderColor: "#ffffff"
   },
   heatmapCellActive: {
     backgroundColor: "rgba(13,159,101,0.75)",
-    borderColor: "rgba(13,159,101,0.86)"
+    borderColor: "#ffffff"
   },
   heatmapCellToday: {
-    borderColor: "rgba(14,99,255,0.95)",
-    borderWidth: 1.5
+    borderColor: theme.colors.accentStrong,
+    borderWidth: 2
   },
   heatmapLegend: {
     marginTop: 10,

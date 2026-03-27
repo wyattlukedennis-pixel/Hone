@@ -1,0 +1,370 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  Animated,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { PaywallModal } from "../../components/PaywallModal";
+import { TactilePressable } from "../../components/TactilePressable";
+import { triggerSelectionHaptic, playRevealSound } from "../../utils/feedback";
+import { hasRevealExportPurchase } from "../../utils/purchases";
+
+type ReelPreviewScreenProps = {
+  visible: boolean;
+  /** URI for the day 1 clip */
+  firstClipUri: string | null;
+  /** URI for the latest clip */
+  latestClipUri: string | null;
+  daySpan: number;
+  goalText?: string | null;
+  onClose: () => void;
+};
+
+const ACCENT_ORANGE = "#E8450A";
+const VIDEO_BORDER_RADIUS = 20;
+
+export default function ReelPreviewScreen({
+  visible,
+  firstClipUri,
+  latestClipUri,
+  daySpan,
+  goalText,
+  onClose,
+}: ReelPreviewScreenProps) {
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [showingNow, setShowingNow] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [showIntention, setShowIntention] = useState(!!goalText);
+  const [paywallVisible, setPaywallVisible] = useState(false);
+  const [purchaseBump, setPurchaseBump] = useState(0);
+  const purchaseUnlocked = hasRevealExportPurchase() || purchaseBump > 0;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const contentAnim = useRef(new Animated.Value(0)).current;
+  const intentionAnim = useRef(new Animated.Value(1)).current;
+  const switchAnim = useRef(new Animated.Value(0)).current; // 0 = day 1, 1 = now
+
+  // Video frame sizing
+  const videoPadding = 20;
+  const frameWidth = width - videoPadding * 2;
+  const frameHeight = (frameWidth * 16) / 9;
+  const maxFrameHeight = height - insets.top - insets.bottom - 180;
+  const finalFrameHeight = Math.min(frameHeight, maxFrameHeight);
+  const finalFrameWidth = (finalFrameHeight * 9) / 16;
+
+  const currentUri = showingNow ? latestClipUri : firstClipUri;
+
+  useEffect(() => {
+    if (visible) {
+      setShowingNow(false);
+      setVideoReady(false);
+      setShowIntention(!!goalText);
+      fadeAnim.setValue(0);
+      contentAnim.setValue(0);
+      intentionAnim.setValue(1);
+      switchAnim.setValue(0);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible, fadeAnim, contentAnim, goalText, intentionAnim, switchAnim]);
+
+  // Auto-dismiss intention after 3s
+  useEffect(() => {
+    if (!visible || !showIntention || !goalText) return;
+    const timer = setTimeout(dismissIntention, 3000);
+    return () => clearTimeout(timer);
+  }, [visible, showIntention, goalText]);
+
+  function dismissIntention() {
+    Animated.timing(intentionAnim, {
+      toValue: 0,
+      duration: 500,
+      useNativeDriver: true,
+    }).start(() => setShowIntention(false));
+  }
+
+  // Show content after video loads
+  useEffect(() => {
+    if (videoReady) {
+      Animated.spring(contentAnim, {
+        toValue: 1,
+        tension: 50,
+        friction: 9,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [videoReady, contentAnim]);
+
+  function handlePlaybackStatus(status: AVPlaybackStatus) {
+    if (!status.isLoaded) return;
+    if (!videoReady) {
+      setVideoReady(true);
+      playRevealSound();
+    }
+  }
+
+  function toggleClip() {
+    triggerSelectionHaptic();
+    const next = !showingNow;
+    setShowingNow(next);
+    Animated.spring(switchAnim, {
+      toValue: next ? 1 : 0,
+      tension: 80,
+      friction: 10,
+      useNativeDriver: true,
+    }).start();
+  }
+
+  const contentTranslateY = contentAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [20, 0],
+  });
+
+  if (!visible) return null;
+
+  return (
+    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+      {/* Close button */}
+      <Pressable
+        style={[styles.closeButton, { top: insets.top + 8 }]}
+        onPress={() => {
+          triggerSelectionHaptic();
+          onClose();
+        }}
+        hitSlop={16}
+      >
+        <Text style={styles.closeButtonText}>✕</Text>
+      </Pressable>
+
+      {/* Intention overlay */}
+      {showIntention && goalText ? (
+        <Pressable style={StyleSheet.absoluteFill} onPress={dismissIntention}>
+          <Animated.View style={[styles.intentionOverlay, { opacity: intentionAnim }]}>
+            <Text style={styles.intentionPreamble}>you said you wanted to...</Text>
+            <Text style={styles.intentionText}>{goalText}</Text>
+            <Text style={styles.intentionCta}>watch what happened.</Text>
+          </Animated.View>
+        </Pressable>
+      ) : null}
+
+      {/* Main content */}
+      <View style={[styles.content, { paddingTop: insets.top + 48, paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
+        {/* Day label above video */}
+        <Animated.View style={[styles.dayLabelRow, { opacity: contentAnim }]}>
+          <Text style={[styles.dayLabel, !showingNow && styles.dayLabelActive]}>day 1</Text>
+          <Text style={styles.dayLabelDivider}>→</Text>
+          <Text style={[styles.dayLabel, showingNow && styles.dayLabelActive]}>day {daySpan}</Text>
+        </Animated.View>
+
+        {/* Video frame — tap to toggle */}
+        <TactilePressable
+          style={[styles.videoFrame, { width: finalFrameWidth, height: finalFrameHeight }]}
+          pressScale={0.98}
+          onPress={toggleClip}
+        >
+          {currentUri ? (
+            <Video
+              key={currentUri}
+              source={{ uri: currentUri }}
+              style={StyleSheet.absoluteFill}
+              resizeMode={ResizeMode.COVER}
+              isLooping
+              isMuted={!purchaseUnlocked}
+              shouldPlay={visible}
+              onPlaybackStatusUpdate={handlePlaybackStatus}
+            />
+          ) : null}
+        </TactilePressable>
+
+        {/* Toggle + info below video */}
+        {videoReady ? (
+          <Animated.View
+            style={[
+              styles.bottomSection,
+              { opacity: contentAnim, transform: [{ translateY: contentTranslateY }] },
+            ]}
+          >
+            {/* Toggle pill */}
+            <TactilePressable style={styles.togglePill} pressScale={0.95} onPress={toggleClip}>
+              <View style={[styles.toggleOption, !showingNow && styles.toggleOptionActive]}>
+                <Text style={[styles.toggleText, !showingNow && styles.toggleTextActive]}>day 1</Text>
+              </View>
+              <View style={[styles.toggleOption, showingNow && styles.toggleOptionActive]}>
+                <Text style={[styles.toggleText, showingNow && styles.toggleTextActive]}>now</Text>
+              </View>
+            </TactilePressable>
+
+            <Text style={styles.tapHint}>tap video to switch</Text>
+
+            {/* Unlock prompt for free users */}
+            {!purchaseUnlocked ? (
+              <TactilePressable
+                style={styles.unlockPill}
+                pressScale={0.96}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  setPaywallVisible(true);
+                }}
+              >
+                <Text style={styles.unlockPillText}>🔇 unlock audio + export</Text>
+              </TactilePressable>
+            ) : null}
+          </Animated.View>
+        ) : null}
+      </View>
+
+      <PaywallModal
+        visible={paywallVisible}
+        onClose={() => setPaywallVisible(false)}
+        onPurchased={() => {
+          setPaywallVisible(false);
+          setPurchaseBump((v) => v + 1);
+        }}
+      />
+    </Animated.View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#f4efe6",
+    zIndex: 9999,
+  },
+  content: {
+    flex: 1,
+    alignItems: "center",
+  },
+  closeButton: {
+    position: "absolute",
+    left: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  closeButtonText: {
+    color: "#101010",
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  dayLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  dayLabel: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.2)",
+  },
+  dayLabelActive: {
+    color: ACCENT_ORANGE,
+    fontSize: 18,
+  },
+  dayLabelDivider: {
+    fontSize: 14,
+    color: "rgba(0,0,0,0.15)",
+    fontWeight: "600",
+  },
+  videoFrame: {
+    borderRadius: VIDEO_BORDER_RADIUS,
+    overflow: "hidden",
+    backgroundColor: "#e8e2d8",
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  bottomSection: {
+    alignItems: "center",
+    paddingTop: 16,
+    gap: 8,
+  },
+  togglePill: {
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.04)",
+    borderRadius: 20,
+    padding: 3,
+  },
+  toggleOption: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 17,
+  },
+  toggleOptionActive: {
+    backgroundColor: ACCENT_ORANGE,
+  },
+  toggleText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.3)",
+  },
+  toggleTextActive: {
+    color: "#ffffff",
+  },
+  tapHint: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "rgba(0,0,0,0.15)",
+  },
+  unlockPill: {
+    marginTop: 12,
+    backgroundColor: ACCENT_ORANGE,
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  unlockPillText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  intentionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#f4efe6",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    zIndex: 50,
+  },
+  intentionPreamble: {
+    color: "rgba(0,0,0,0.35)",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  intentionText: {
+    color: "#101010",
+    fontSize: 24,
+    fontWeight: "400",
+    fontStyle: "italic",
+    textAlign: "center",
+    lineHeight: 34,
+    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+  },
+  intentionCta: {
+    color: "rgba(0,0,0,0.25)",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 24,
+    textAlign: "center",
+  },
+});

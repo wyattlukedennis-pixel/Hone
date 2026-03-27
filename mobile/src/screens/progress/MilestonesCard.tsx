@@ -86,7 +86,10 @@ export function MilestonesCard({
 const styles = StyleSheet.create({
   milestoneCard: {
     marginTop: 14,
-    borderRadius: 22,
+    borderRadius: theme.shape.cardRadiusLg,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     padding: 14
   },
   milestoneHeader: {
@@ -98,17 +101,25 @@ const styles = StyleSheet.create({
   milestoneTitle: {
     color: theme.colors.textPrimary,
     fontSize: 24,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   milestoneCount: {
     color: theme.colors.textSecondary,
-    fontWeight: "700"
+    fontWeight: "800",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
   },
   milestoneRow: {
     marginTop: 12,
     flexDirection: "row",
     gap: 10,
-    borderRadius: 12,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)",
     paddingHorizontal: 8,
     paddingVertical: 8
   },
@@ -116,10 +127,10 @@ const styles = StyleSheet.create({
     marginTop: 3,
     width: 12,
     height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.7)",
-    backgroundColor: "rgba(255,255,255,0.3)"
+    borderRadius: 0,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.95)"
   },
   milestoneDotUnlocked: {
     backgroundColor: theme.colors.success,

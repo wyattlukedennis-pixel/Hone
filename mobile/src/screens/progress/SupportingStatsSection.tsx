@@ -35,10 +35,10 @@ export function SupportingStatsSection({ open, onToggle, children }: SupportingS
 const styles = StyleSheet.create({
   supportingWrap: {
     marginTop: 18,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.68)",
-    backgroundColor: "rgba(255,255,255,0.24)",
+    borderRadius: theme.shape.cardRadiusLg,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     padding: 13
   },
   supportingHeader: {
@@ -53,18 +53,23 @@ const styles = StyleSheet.create({
   supportingTitle: {
     color: theme.colors.textPrimary,
     fontSize: 16,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
   },
   supportingSubtitle: {
     marginTop: 2,
     color: theme.colors.textSecondary,
     fontSize: 13,
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   supportingToggle: {
     color: theme.colors.accentStrong,
-    fontSize: 13,
-    fontWeight: "800"
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
   },
   pressScale: {
     transform: [{ scale: 0.98 }]

@@ -12,7 +12,7 @@ type RecorderPermissionGateProps = {
 
 export function RecorderPermissionGate({ paddingTop, onClose, onRequestPermission }: RecorderPermissionGateProps) {
   return (
-    <LinearGradient colors={["#e6eef7", "#d0deef"]} style={[styles.permissionWrap, { paddingTop }]}>
+    <LinearGradient colors={["#f4efe6", "#f4efe6"]} style={[styles.permissionWrap, { paddingTop }]}>
       <Pressable
         style={({ pressed }) => [styles.closeButton, pressed ? styles.buttonPressed : undefined]}
         onPress={() => {
@@ -20,11 +20,11 @@ export function RecorderPermissionGate({ paddingTop, onClose, onRequestPermissio
           onClose();
         }}
       >
-        <Text style={styles.closeButtonText}>Close</Text>
+        <Text style={styles.closeButtonText}>close</Text>
       </Pressable>
       <View style={styles.permissionCard}>
-        <Text style={styles.permissionTitle}>Camera access needed</Text>
-        <Text style={styles.permissionText}>Hone uses quick daily clips to track your progress.</Text>
+        <Text style={styles.permissionTitle}>camera access required</Text>
+        <Text style={styles.permissionText}>Hone uses quick daily takes to track your progress arc.</Text>
         <Pressable
           style={styles.allowButton}
           onPress={() => {
@@ -32,7 +32,7 @@ export function RecorderPermissionGate({ paddingTop, onClose, onRequestPermissio
             onRequestPermission();
           }}
         >
-          <Text style={styles.allowText}>Allow Camera</Text>
+          <Text style={styles.allowText}>enable camera</Text>
         </Pressable>
       </View>
     </LinearGradient>

@@ -277,8 +277,8 @@ const styles = StyleSheet.create({
     height: ITEM_HEIGHT,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.38)",
-    backgroundColor: "rgba(14,99,255,0.12)"
+    borderColor: "rgba(255,90,31,0.30)",
+    backgroundColor: "rgba(255,90,31,0.10)"
   },
   itemRow: {
     height: ITEM_HEIGHT,

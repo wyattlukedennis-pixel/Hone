@@ -36,6 +36,14 @@ function toDateKey(value: Date) {
   return `${y}-${m}-${d}`;
 }
 
+function dayKeyToDate(value: string) {
+  const [year, month, day] = value.split("-").map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
 export function ProgressCalendarCard({
   entries,
   selectedDay,
@@ -66,11 +74,15 @@ export function ProgressCalendarCard({
   } = useMemo(() => {
     const entriesByDate = new Map<string, TimelineEntry>();
     entries.forEach((entry) => {
-      entriesByDate.set(toDateKey(new Date(entry.clip.recordedAt)), entry);
+      entriesByDate.set(entry.clip.recordedOn.slice(0, 10), entry);
     });
 
-    const latestAnchor = entries.length ? new Date(entries[entries.length - 1].clip.recordedAt) : new Date();
-    const earliestAnchor = entries.length ? new Date(entries[0].clip.recordedAt) : latestAnchor;
+    const latestAnchor =
+      entries.length > 0
+        ? dayKeyToDate(entries[entries.length - 1].clip.recordedOn.slice(0, 10)) ?? new Date(entries[entries.length - 1].clip.recordedAt)
+        : new Date();
+    const earliestAnchor =
+      entries.length > 0 ? dayKeyToDate(entries[0].clip.recordedOn.slice(0, 10)) ?? new Date(entries[0].clip.recordedAt) : latestAnchor;
     const latestMonthIndex = latestAnchor.getFullYear() * 12 + latestAnchor.getMonth();
     const earliestMonthIndex = earliestAnchor.getFullYear() * 12 + earliestAnchor.getMonth();
     const displayMonthIndex = latestMonthIndex + monthOffset;
@@ -194,7 +206,10 @@ export function ProgressCalendarCard({
 const styles = StyleSheet.create({
   card: {
     marginTop: 18,
-    borderRadius: 24,
+    borderRadius: theme.shape.cardRadiusLg,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)",
     padding: 16
   },
   header: {
@@ -206,31 +221,37 @@ const styles = StyleSheet.create({
   title: {
     color: theme.colors.textPrimary,
     fontSize: 24,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   subtitle: {
     marginTop: 4,
     color: theme.colors.textSecondary,
     fontWeight: "600",
-    maxWidth: 280
+    maxWidth: 280,
+    fontFamily: theme.typography.body
   },
   clearChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.72)",
-    backgroundColor: "rgba(255,255,255,0.24)",
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)",
     paddingHorizontal: 10,
     paddingVertical: 5
   },
   clearChipText: {
     color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "800",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.78,
+    fontFamily: theme.typography.label
   },
   monthLabel: {
     color: theme.colors.textPrimary,
     fontWeight: "800",
-    fontSize: 16
+    fontSize: 16,
+    fontFamily: theme.typography.display
   },
   monthNavRow: {
     marginTop: 12,
@@ -240,10 +261,10 @@ const styles = StyleSheet.create({
     gap: 10
   },
   monthNavChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.72)",
-    backgroundColor: "rgba(255,255,255,0.22)",
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(241,233,221,0.94)",
     paddingHorizontal: 10,
     paddingVertical: 5
   },
@@ -252,8 +273,11 @@ const styles = StyleSheet.create({
   },
   monthNavText: {
     color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "800",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.72,
+    fontFamily: theme.typography.label
   },
   weekdayRow: {
     marginTop: 8,
@@ -264,8 +288,11 @@ const styles = StyleSheet.create({
     width: `${100 / 7}%`,
     textAlign: "center",
     color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "800",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.72,
+    fontFamily: theme.typography.label
   },
   grid: {
     marginTop: 8,
@@ -276,8 +303,8 @@ const styles = StyleSheet.create({
   dayCell: {
     width: `${100 / 7}%`,
     aspectRatio: 1,
-    borderRadius: 10,
-    borderWidth: 1,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 2,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -286,27 +313,27 @@ const styles = StyleSheet.create({
     aspectRatio: 1
   },
   dayCellMissed: {
-    borderColor: "rgba(255,255,255,0.28)",
-    backgroundColor: "rgba(255,255,255,0.1)"
+    borderColor: "#9a8f80",
+    backgroundColor: "rgba(237,229,217,0.8)"
   },
   dayCellRecorded: {
-    borderColor: "rgba(14,99,255,0.48)",
-    backgroundColor: "rgba(14,99,255,0.2)"
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(255,90,31,0.24)"
   },
   dayCellSelected: {
-    borderColor: "rgba(255,255,255,0.88)",
-    borderWidth: 1.5
+    borderColor: "#ffffff",
+    borderWidth: 3
   },
   dayCellCompareSelected: {
-    backgroundColor: "rgba(13,159,101,0.24)",
-    borderColor: "rgba(13,159,101,0.62)"
+    backgroundColor: "rgba(13,159,101,0.2)",
+    borderColor: "#ffffff"
   },
   dayLabelMissed: {
-    color: "rgba(34,70,111,0.52)",
+    color: "rgba(42,42,42,0.58)",
     fontWeight: "600"
   },
   dayLabelRecorded: {
-    color: "#eaf4ff",
+    color: theme.colors.textPrimary,
     fontWeight: "800"
   },
   legendRow: {
@@ -322,13 +349,15 @@ const styles = StyleSheet.create({
   legendDot: {
     width: 8,
     height: 8,
-    borderRadius: 4
+    borderRadius: 0,
+    borderWidth: 2,
+    borderColor: "#ffffff"
   },
   legendDotRecorded: {
-    backgroundColor: "rgba(14,99,255,0.8)"
+    backgroundColor: "rgba(255,90,31,0.58)"
   },
   legendDotMissed: {
-    backgroundColor: "rgba(255,255,255,0.3)"
+    backgroundColor: "rgba(237,229,217,0.8)"
   },
   legendText: {
     color: theme.colors.textSecondary,

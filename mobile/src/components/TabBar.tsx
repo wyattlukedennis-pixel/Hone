@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { GlassSurface } from "./GlassSurface";
 import { theme } from "../theme";
@@ -13,9 +14,9 @@ type TabBarProps = {
 };
 
 const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: "journeys", label: "Practice" },
-  { key: "progress", label: "Progress" },
-  { key: "settings", label: "Profile" }
+  { key: "journeys", label: "practice" },
+  { key: "progress", label: "progress" },
+  { key: "settings", label: "profile" }
 ];
 
 export function TabBar({ activeTab, onSelect }: TabBarProps) {
@@ -49,7 +50,7 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
 
   return (
     <View style={styles.safeWrap}>
-      <GlassSurface style={styles.container}>
+      <GlassSurface style={styles.container} intensity={14}>
         <View
           style={styles.row}
           onLayout={(event) => {
@@ -59,8 +60,15 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
           {tabWidth ? (
             <Animated.View
               pointerEvents="none"
-              style={[styles.indicator, { width: indicatorWidth, transform: [{ translateX: indicatorX }] }]}
-            />
+              style={[styles.indicatorShell, { width: indicatorWidth, transform: [{ translateX: indicatorX }] }]}
+            >
+              <LinearGradient
+                colors={theme.gradients.tabIndicator}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.indicatorFill}
+              />
+            </Animated.View>
           ) : null}
           {tabs.map((tab) => {
             const active = tab.key === activeTab;
@@ -86,48 +94,60 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
 const styles = StyleSheet.create({
   safeWrap: {
     paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 10
+    paddingTop: 8,
+    paddingBottom: 12
   },
   container: {
-    borderRadius: 24,
+    borderRadius: theme.shape.tabBarRadius,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.66)",
-    shadowColor: "#113761",
-    shadowOpacity: 0.14,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 6
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(243,238,229,0.96)",
+    shadowColor: "#000000",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 3
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     position: "relative",
-    padding: 5
+    padding: 4
   },
   item: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
+    paddingVertical: 10,
     zIndex: 2
   },
-  indicator: {
+  indicatorShell: {
     position: "absolute",
-    left: 5,
-    top: 5,
-    bottom: 5,
-    borderRadius: 16,
-    backgroundColor: "rgba(236,245,255,0.86)",
+    left: 4,
+    top: 4,
+    bottom: 4,
+    borderRadius: theme.shape.tabIndicatorRadius,
+    overflow: "hidden",
+    shadowColor: "transparent",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
     zIndex: 1
   },
+  indicatorFill: {
+    flex: 1
+  },
   label: {
-    color: theme.colors.tabText,
-    fontSize: 14,
-    fontWeight: "700"
+    color: "#2c2c2c",
+    fontSize: 13,
+    letterSpacing: 0.3,
+    fontWeight: "800",
+    fontFamily: theme.typography.label
   },
   labelActive: {
-    color: theme.colors.tabTextActive,
-    fontWeight: "800"
+    color: "#ffffff",
+    fontWeight: "900",
+    fontFamily: theme.typography.label
   }
 });

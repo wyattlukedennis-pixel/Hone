@@ -4,6 +4,7 @@ import { requireAuth } from "../auth/guard.js";
 import { listClipsForJourney } from "../clips/repository.js";
 import { getPool } from "../db/pool.js";
 import { findJourneyByIdForUser } from "../journeys/repository.js";
+import { renderRevealMontage } from "./revealRenderer.js";
 import {
   createComparisonRender,
   createMilestoneRender,
@@ -37,6 +38,17 @@ type QueueComparisonBody = {
   comparisonType?: "day1_vs_latest" | "day7_vs_latest" | "day30_vs_latest";
 };
 
+type RenderRevealBody = {
+  chapterNumber?: number;
+  milestoneLengthDays?: number;
+  progressDays?: number;
+  currentStreak?: number;
+  clipIds?: string[];
+  storylineHeadline?: string;
+  storylineCaption?: string;
+  storylineReflection?: string;
+};
+
 function parseComparisonType(value: unknown) {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
@@ -44,6 +56,52 @@ function parseComparisonType(value: unknown) {
     return normalized as "day1_vs_latest" | "day7_vs_latest" | "day30_vs_latest";
   }
   return null;
+}
+
+function normalizePositiveInt(value: unknown, fallback: number, max = 9999) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  const normalized = Math.floor(value);
+  if (normalized < 1) return fallback;
+  return Math.min(normalized, max);
+}
+
+function normalizeNonNegativeInt(value: unknown, fallback: number, max = 99999) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  const normalized = Math.floor(value);
+  if (normalized < 0) return fallback;
+  return Math.min(normalized, max);
+}
+
+function normalizeClipIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function normalizeStorylineText(value: unknown, maxLength: number) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.slice(0, maxLength);
+}
+
+function dedupeClipOrder<T extends { id: string }>(clips: T[]) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const clip of clips) {
+    if (seen.has(clip.id)) continue;
+    seen.add(clip.id);
+    deduped.push(clip);
+  }
+  return deduped;
+}
+
+function getBaseUrl(protocol: string, host: string | undefined) {
+  const resolvedHost = host ?? "localhost:4000";
+  return `${protocol}://${resolvedHost}`;
 }
 
 function uniqueDays(clips: { recordedOn: string }[]) {
@@ -77,6 +135,69 @@ function findComparisonPair(
 }
 
 export function registerProgressRoutes(app: FastifyInstance) {
+  app.post<{ Params: JourneyParams; Body: RenderRevealBody }>("/journeys/:journeyId/reveal/render", async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+
+    const chapterNumber = normalizePositiveInt(request.body?.chapterNumber, 1, 1000);
+    const milestoneLengthDays = normalizePositiveInt(request.body?.milestoneLengthDays, 7, 365);
+    const progressDays = normalizeNonNegativeInt(request.body?.progressDays, 0, 3650);
+    const currentStreak = normalizeNonNegativeInt(request.body?.currentStreak, 0, 3650);
+    const requestedClipIds = normalizeClipIds(request.body?.clipIds);
+    const storylineHeadline = normalizeStorylineText(request.body?.storylineHeadline, 96);
+    const storylineCaption = normalizeStorylineText(request.body?.storylineCaption, 132);
+    const storylineReflection = normalizeStorylineText(request.body?.storylineReflection, 180);
+
+    const pool = getPool();
+    const journey = await findJourneyByIdForUser(pool, {
+      journeyId: request.params.journeyId,
+      userId: auth.user.id
+    });
+    if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
+
+    const clips = await listClipsForJourney(pool, journey.id);
+    const clipMap = new Map(clips.map((clip) => [clip.id, clip]));
+    const requestedClips =
+      requestedClipIds.length > 0
+        ? requestedClipIds.map((clipId) => clipMap.get(clipId)).filter((clip): clip is NonNullable<typeof clip> => Boolean(clip))
+        : [];
+    const fallbackRecent = [...clips].sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime()).slice(-12);
+    const selectedClips =
+      requestedClips.length >= 2
+        ? dedupeClipOrder(requestedClips).slice(0, 12)
+        : dedupeClipOrder([...requestedClips, ...fallbackRecent]).slice(0, 12);
+
+    if (!selectedClips.length) {
+      return reply.code(400).send({ error: "NO_CLIPS_AVAILABLE" });
+    }
+
+    try {
+      const render = await renderRevealMontage({
+        journeyId: journey.id,
+        journeyTitle: journey.title,
+        chapterNumber,
+        milestoneLengthDays,
+        progressDays,
+        currentStreak,
+        storylineHeadline,
+        storylineCaption,
+        storylineReflection,
+        clips: selectedClips
+      });
+
+      const baseUrl = getBaseUrl(request.protocol, request.headers.host);
+      return reply.code(201).send({
+        renderUrl: `${baseUrl}/media/${render.outputRelativePath}`,
+        cacheHit: render.cacheHit,
+        renderedClipCount: render.clipCount,
+        skippedClipCount: render.skippedClipCount
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "reveal render failed");
+      return reply.code(500).send({ error: "REVEAL_RENDER_FAILED" });
+    }
+  });
+
   app.post<{ Params: JourneyParams; Body: QueueComparisonBody }>("/journeys/:journeyId/comparisons", async (request, reply) => {
     const auth = await requireAuth(request, reply);
     if (!auth) return;

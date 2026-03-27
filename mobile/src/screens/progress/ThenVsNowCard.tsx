@@ -87,31 +87,34 @@ export function ThenVsNowCard({
 const styles = StyleSheet.create({
   compareCard: {
     marginTop: 20,
-    borderRadius: 24,
+    borderRadius: theme.shape.cardRadiusLg,
     padding: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.78)"
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(246,240,232,0.98)"
   },
   compareCardHero: {
     marginTop: 16,
     padding: 18,
-    shadowColor: "#0c2e54",
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 9 },
-    elevation: 9
+    shadowColor: "#000000",
+    shadowOpacity: 0.2,
+    shadowRadius: 0,
+    shadowOffset: { width: 4, height: 4 },
+    elevation: 0
   },
   journeyEyebrow: {
     color: theme.colors.textSecondary,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 1,
     fontWeight: "800",
-    fontSize: 12
+    fontSize: 11,
+    fontFamily: theme.typography.label
   },
   compareTitle: {
     color: theme.colors.textPrimary,
     fontSize: 24,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   compareTitleHero: {
     fontSize: 34,
@@ -121,7 +124,8 @@ const styles = StyleSheet.create({
     marginTop: 5,
     color: theme.colors.textSecondary,
     fontWeight: "700",
-    fontSize: 15
+    fontSize: 15,
+    fontFamily: theme.typography.body
   },
   mutedText: {
     marginTop: 10,
@@ -129,18 +133,28 @@ const styles = StyleSheet.create({
   },
   revealButton: {
     marginTop: 14,
-    borderRadius: 15,
-    backgroundColor: theme.colors.accent,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(255,90,31,0.28)",
     paddingVertical: 14,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 0,
+    shadowOffset: { width: 3, height: 3 },
+    elevation: 0
   },
   revealButtonHero: {
     marginTop: 12
   },
   revealButtonText: {
-    color: "#eaf4ff",
+    color: theme.colors.textPrimary,
     fontWeight: "800",
-    fontSize: 15
+    fontSize: 14,
+    letterSpacing: 0.92,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label
   }
 });

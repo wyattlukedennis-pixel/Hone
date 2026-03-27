@@ -1,21 +1,74 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, Image, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { ResizeMode, Video } from "expo-av";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { trackEvent } from "../analytics/events";
 import { motionTokens } from "../motion/tokens";
 import { PracticeRecorder } from "../components/PracticeRecorder";
 import { TactilePressable } from "../components/TactilePressable";
+import { readWeeklyProofCardDismissed, writeWeeklyProofCardDismissed } from "../storage/weeklyProofCardStorage";
 import { theme } from "../theme";
+import type { Clip } from "../types/clip";
 import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
-import { getDailyMomentKey, isInDailyMomentWindow } from "../utils/dailyMoment";
+import { formatDailyMomentTime, getDailyMomentKey, isInDailyMomentWindow } from "../utils/dailyMoment";
+import { buildChapterComparisonPlan, type ChapterTrailerMoment } from "../utils/progress";
+import { exportAndShareReel } from "../utils/reelExport";
+import { triggerSelectionHaptic } from "../utils/feedback";
 import { useReducedMotion } from "../utils/useReducedMotion";
 import { ActionButton } from "./practice/ActionButton";
 import { ManageJourneysModal } from "./practice/ManageJourneysModal";
 import { PracticeCalendarMini } from "./practice/PracticeCalendarMini";
 import { usePracticeState } from "./practice/usePracticeState";
+
+function parseLocalDayKey(value: string) {
+  const [yearRaw, monthRaw, dayRaw] = value.split("-").map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(yearRaw) || !Number.isFinite(monthRaw) || !Number.isFinite(dayRaw)) return null;
+  const parsed = new Date(yearRaw, monthRaw - 1, dayRaw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function toDayKey(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveWeekStartMonday(value: Date) {
+  const start = new Date(value);
+  start.setHours(0, 0, 0, 0);
+  const offset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - offset);
+  return start;
+}
+
+function selectTrailerIndices(total: number) {
+  if (total <= 1) return [0];
+  if (total === 2) return [0, 1];
+  if (total === 3) return [0, 1, 2];
+  const end = total - 1;
+  return [...new Set([0, Math.round(end * 0.5), end])].sort((a, b) => a - b);
+}
+
+function buildWeeklyTrailerMoments(clips: Clip[]): ChapterTrailerMoment[] {
+  if (!clips.length) return [];
+  const indices = selectTrailerIndices(clips.length);
+  const labelsByCount: Record<number, string[]> = {
+    1: ["NOW"],
+    2: ["THEN", "NOW"],
+    3: ["THEN", "MOMENT", "NOW"]
+  };
+  const labels = labelsByCount[indices.length] ?? labelsByCount[3];
+  return indices.map((index, labelIndex) => ({
+    clip: clips[index],
+    label: labels[labelIndex] ?? `MOMENT ${labelIndex + 1}`
+  }));
+}
 
 type JourneysScreenProps = {
   token: string;
@@ -26,8 +79,12 @@ type JourneysScreenProps = {
   devDateShiftSettings: DevDateShiftSettings;
   onDevDateShiftSettingsChange: (next: DevDateShiftSettings) => void;
   dailyMomentSettings: DailyMomentSettings;
+  onDailyMomentSettingsChange: (next: DailyMomentSettings) => void;
   openRecorderSignal: number;
+  deepLinkRecorderSignal: number;
+  deepLinkRecorderJourneyId: string | null;
   recordingsRevision: number;
+  onRecordingsRevisionBump?: () => void;
 };
 
 export function JourneysScreen({
@@ -39,8 +96,12 @@ export function JourneysScreen({
   devDateShiftSettings,
   onDevDateShiftSettingsChange,
   dailyMomentSettings,
+  onDailyMomentSettingsChange,
   openRecorderSignal,
-  recordingsRevision
+  deepLinkRecorderSignal,
+  deepLinkRecorderJourneyId,
+  recordingsRevision,
+  onRecordingsRevisionBump
 }: JourneysScreenProps) {
   const reducedMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
@@ -49,6 +110,8 @@ export function JourneysScreen({
   const streakTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heroSectionReveal = useRef(new Animated.Value(0)).current;
   const previewSectionReveal = useRef(new Animated.Value(0)).current;
+  const calendarSectionReveal = useRef(new Animated.Value(0)).current;
+  const fabBob = useRef(new Animated.Value(0)).current;
   const {
     journeys,
     loading,
@@ -69,6 +132,8 @@ export function JourneysScreen({
     setNewMilestoneLengthDays,
     newCaptureMode,
     setNewCaptureMode,
+    newSkillPack,
+    setNewSkillPack,
     clipsByJourney,
     recorderJourneyId,
     setRecorderJourneyId,
@@ -77,8 +142,6 @@ export function JourneysScreen({
     setRecorderStatusMessage,
     statPulse,
     celebration,
-    celebrationOpacity,
-    celebrationY,
     saveFlightOpacity,
     saveFlightX,
     saveFlightY,
@@ -97,7 +160,9 @@ export function JourneysScreen({
     recorderJourney,
     recorderCaptureType,
     recorderDay,
-    recorderReferenceClipUrl
+    recorderReferenceClipUrl,
+    autoReminderSuggestion,
+    acknowledgeAutoReminderSuggestion
   } = usePracticeState({
     token,
     activeJourneyId,
@@ -134,9 +199,21 @@ export function JourneysScreen({
   const chapterDisplayDay = chapterRevealReady
     ? chapterTargetDays
     : Math.max(1, Math.min(chapterTargetDays, chapterProgressDays + (practicedToday ? 0 : 1)));
-  const chapterCountdownLabel = chapterRevealReady
-    ? "Your reveal is ready."
-    : `${chapterRemainingDays} ${chapterRemainingDays === 1 ? "practice" : "practices"} until reveal`;
+  const primaryActionLabel = chapterRevealReady
+    ? "watch reveal"
+    : practicedToday
+      ? "retake"
+      : "record";
+  // Latest clip thumbnail for hero background
+  const latestClipThumbnail = useMemo(() => {
+    if (!activeJourneyClips.length) return null;
+    const sorted = [...activeJourneyClips].sort(
+      (a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt)
+    );
+    const latest = sorted[sorted.length - 1];
+    return latest?.thumbnailUrl ?? (latest?.captureType === "photo" ? latest.videoUrl : null);
+  }, [activeJourneyClips]);
+
   const criticalMode = availableHeight < 560;
   const ultraCompactMode = availableHeight < 680;
   const tightMode = availableHeight < 700;
@@ -144,19 +221,119 @@ export function JourneysScreen({
   const revealFocusMode = chapterRevealReady;
   const headingScale = availableHeight >= 860 ? 1.02 : availableHeight >= 760 ? 0.98 : availableHeight >= 700 ? 0.93 : 0.88;
   const effectiveHeadingScale = revealFocusMode ? headingScale * 0.92 : headingScale;
-  const skillNameSize = Math.round(23 * effectiveHeadingScale);
-  const dayLineSize = Math.round(17 * effectiveHeadingScale);
-  const streakLineSize = Math.round(13 * effectiveHeadingScale);
-  const sceneHorizontalPadding = criticalMode ? 14 : 20;
-  const sceneTopPadding = criticalMode ? 2 : ultraCompactMode ? 6 : 10;
-  const sceneBottomPadding = Math.max(insets.bottom + 112, 124);
+  const skillNameSize = Math.round(36 * effectiveHeadingScale);
+  const dayLineSize = Math.round(22 * effectiveHeadingScale);
+  const streakLineSize = Math.round(16 * effectiveHeadingScale);
+  const sceneHorizontalPadding = criticalMode ? 14 : 18;
+  const sceneTopPadding = criticalMode ? 2 : ultraCompactMode ? 4 : 6;
+  const sceneBottomPadding = Math.max(insets.bottom + (criticalMode ? 174 : compactMode ? 186 : 198), criticalMode ? 188 : 206);
   const scenePrimaryDense = compactMode || criticalMode;
   const sceneCalendarCompact = criticalMode || availableHeight < 700;
+  const missedDayRecovery = useMemo(() => {
+    if (practicedToday || chapterRevealReady || activeJourneyClips.length === 0) return null;
+
+    let latestPracticeDayMs: number | null = null;
+    for (const clip of activeJourneyClips) {
+      const dayKey = clip.recordedOn.slice(0, 10);
+      const dayDate = parseLocalDayKey(dayKey);
+      if (!dayDate) continue;
+      const dayMs = dayDate.getTime();
+      if (latestPracticeDayMs === null || dayMs > latestPracticeDayMs) {
+        latestPracticeDayMs = dayMs;
+      }
+    }
+    if (latestPracticeDayMs === null) return null;
+
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const daysSinceLastPractice = Math.floor((today.getTime() - latestPracticeDayMs) / 86_400_000);
+    if (daysSinceLastPractice < 2) return null;
+    return {
+      missedDays: daysSinceLastPractice - 1
+    };
+  }, [practicedToday, chapterRevealReady, activeJourneyClips, now]);
+  const suggestedReminderLabel = useMemo(() => {
+    if (!autoReminderSuggestion) return null;
+    return formatDailyMomentTime({
+      ...dailyMomentSettings,
+      hour: autoReminderSuggestion.hour,
+      minute: autoReminderSuggestion.minute
+    });
+  }, [autoReminderSuggestion?.hour, autoReminderSuggestion?.minute, dailyMomentSettings]);
+  const weeklyProof = useMemo(() => {
+    if (!activeJourney) return null;
+    const weekStart = resolveWeekStartMonday(now);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const startKey = toDayKey(weekStart);
+    const endKey = toDayKey(weekEnd);
+    const weekKey = `${startKey}:${endKey}`;
+    const weeklyClips = [...activeJourneyClips]
+      .filter((clip) => clip.captureType === activeJourney.captureMode)
+      .filter((clip) => {
+        const dayKey = clip.recordedOn.slice(0, 10);
+        return dayKey >= startKey && dayKey <= endKey;
+      })
+      .sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
+    const uniqueDays = new Set(weeklyClips.map((clip) => clip.recordedOn.slice(0, 10)));
+    return {
+      weekKey,
+      weekLabel: `${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${weekEnd.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric"
+      })}`,
+      clips: weeklyClips,
+      progressDays: uniqueDays.size,
+      shareReady: weeklyClips.length >= 2,
+      trailerMoments: buildWeeklyTrailerMoments(weeklyClips)
+    };
+  }, [activeJourney?.id, activeJourney?.captureMode, activeJourneyClips, now]);
+  const compareReady = useMemo(() => {
+    if (!activeJourney) return false;
+    const plan = buildChapterComparisonPlan(
+      activeJourneyClips.filter((clip) => clip.captureType === activeJourney.captureMode),
+      {
+        milestoneLengthDays: activeJourney.milestoneLengthDays,
+        milestoneStartDay: activeJourney.milestoneStartDay,
+        milestoneChapter: activeJourney.milestoneChapter
+      }
+    );
+    return Boolean(plan?.comparison);
+  }, [
+    activeJourney?.id,
+    activeJourney?.captureMode,
+    activeJourney?.milestoneLengthDays,
+    activeJourney?.milestoneStartDay,
+    activeJourney?.milestoneChapter,
+    activeJourneyClips
+  ]);
+  const evolutionMoments = useMemo(() => {
+    if (!activeJourney) return [];
+    const clips = [...activeJourneyClips]
+      .filter((clip) => clip.captureType === activeJourney.captureMode)
+      .sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
+    if (!clips.length) return [];
+    const indices = clips.length === 2 ? [0, 1] : selectTrailerIndices(clips.length);
+    const labelsByCount: Record<number, string[]> = {
+      1: ["start"],
+      2: ["then", "now"],
+      3: ["then", "mid", "now"]
+    };
+    const labels = labelsByCount[indices.length] ?? labelsByCount[3];
+    return indices.map((index, labelIndex) => ({
+      clip: clips[index],
+      label: labels[labelIndex] ?? `take ${labelIndex + 1}`
+    }));
+  }, [activeJourney?.id, activeJourney?.captureMode, activeJourneyClips]);
+  const [weeklyProofSharing, setWeeklyProofSharing] = useState(false);
+  const [weeklyProofMessage, setWeeklyProofMessage] = useState<string | null>(null);
+  const [weeklyProofDismissed, setWeeklyProofDismissed] = useState(false);
   const [displayStreak, setDisplayStreak] = useState(normalizedStreak);
   const displayStreakRef = useRef(normalizedStreak);
   const countersBootstrappedRef = useRef(false);
   const autoOpenedMomentKeyRef = useRef<string | null>(null);
   const handledNotificationSignalRef = useRef(0);
+  const handledDeepLinkSignalRef = useRef(0);
 
   function animateCounter(
     valueRef: { current: number },
@@ -221,7 +398,18 @@ export function JourneysScreen({
     if (recorderJourneyId) return;
     setRecorderJourneyId(activeJourney.id);
     trackEvent("record_tapped", { journeyId: activeJourney.id, context: "daily_moment_notification" });
-  }, [openRecorderSignal, activeJourney?.id, recorderJourneyId]);
+  }, [openRecorderSignal]); // Only re-run on signal change, not recorder state
+
+  useEffect(() => {
+    if (!deepLinkRecorderSignal) return;
+    if (deepLinkRecorderSignal <= handledDeepLinkSignalRef.current) return;
+    const targetJourneyId = deepLinkRecorderJourneyId ?? activeJourney?.id ?? null;
+    if (!targetJourneyId) return;
+    handledDeepLinkSignalRef.current = deepLinkRecorderSignal;
+    if (recorderJourneyId) return;
+    setRecorderJourneyId(targetJourneyId);
+    trackEvent("record_tapped", { journeyId: targetJourneyId, context: "progress_deep_link" });
+  }, [deepLinkRecorderSignal]); // Only re-run on signal change, not recorder state
 
   useEffect(() => {
     if (!countersBootstrappedRef.current) {
@@ -256,26 +444,32 @@ export function JourneysScreen({
     if (reducedMotion) {
       heroSectionReveal.setValue(1);
       previewSectionReveal.setValue(1);
+      calendarSectionReveal.setValue(1);
       return;
     }
 
-    heroSectionReveal.setValue(0);
-    previewSectionReveal.setValue(0);
-    Animated.stagger(motionTokens.sectionStaggerMs, [
-      Animated.timing(heroSectionReveal, {
-        toValue: 1,
-        duration: theme.motion.transitionMs + motionTokens.durationOffset.sectionIn,
-        easing: motionTokens.easing.outCubic,
-        useNativeDriver: true
-      }),
-      Animated.timing(previewSectionReveal, {
-        toValue: 1,
-        duration: theme.motion.transitionMs + motionTokens.durationOffset.sectionInLight,
-        easing: motionTokens.easing.outCubic,
-        useNativeDriver: true
-      })
-    ]).start();
-  }, [activeJourney?.id, reducedMotion, heroSectionReveal, previewSectionReveal]);
+    heroSectionReveal.setValue(1);
+    previewSectionReveal.setValue(1);
+    calendarSectionReveal.setValue(1);
+
+    // FAB gentle floating bob
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(fabBob, {
+          toValue: 1,
+          duration: 2000,
+          easing: motionTokens.easing.outCubic,
+          useNativeDriver: true
+        }),
+        Animated.timing(fabBob, {
+          toValue: 0,
+          duration: 2000,
+          easing: motionTokens.easing.outCubic,
+          useNativeDriver: true
+        })
+      ])
+    ).start();
+  }, [activeJourney?.id, reducedMotion, heroSectionReveal, previewSectionReveal, calendarSectionReveal, fabBob]);
 
   function handlePrimaryAction() {
     if (!activeJourney) return;
@@ -288,50 +482,157 @@ export function JourneysScreen({
       onOpenProgress(activeJourney.id, { openReveal: true });
       return;
     }
-    trackEvent("record_tapped", { journeyId: activeJourney.id, context: "practice_primary" });
+    trackEvent("record_tapped", {
+      journeyId: activeJourney.id,
+      context: "practice_primary"
+    });
     setRecorderJourneyId(activeJourney.id);
+  }
+
+  useEffect(() => {
+    setWeeklyProofMessage(null);
+    setWeeklyProofSharing(false);
+  }, [activeJourney?.id, weeklyProof?.weekKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDismissedState() {
+      if (!weeklyProof?.weekKey) {
+        setWeeklyProofDismissed(false);
+        return;
+      }
+      const dismissed = await readWeeklyProofCardDismissed({
+        journeyId: activeJourney?.id ?? null,
+        weekKey: weeklyProof.weekKey
+      });
+      if (cancelled) return;
+      setWeeklyProofDismissed(dismissed);
+    }
+    void loadDismissedState();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeJourney?.id, weeklyProof?.weekKey]);
+
+  async function handleShareWeeklyProof() {
+    if (!activeJourney || !weeklyProof || weeklyProofSharing || !weeklyProof.clips.length) return;
+    setWeeklyProofSharing(true);
+    setWeeklyProofMessage(null);
+    const startedAtMs = Date.now();
+    trackEvent("weekly_proof_share_started", {
+      journeyId: activeJourney.id,
+      progressDays: weeklyProof.progressDays,
+      clipCount: weeklyProof.clips.length
+    });
+    const result = await exportAndShareReel({
+      chapterNumber,
+      trailerMoments: weeklyProof.trailerMoments,
+      sourceClips: weeklyProof.clips,
+      fallbackClip: weeklyProof.clips[weeklyProof.clips.length - 1] ?? null,
+      milestoneLengthDays: 7,
+      progressDays: weeklyProof.progressDays,
+      currentStreak: activeStreak,
+      storylineHeadline: `weekly proof • ${weeklyProof.weekLabel}`,
+      storylineCaption: `${weeklyProof.progressDays}/7 days captured`,
+      storylineReflection: "small daily reps stacked into visible progress this week.",
+      token,
+      journeyId: activeJourney.id
+    });
+    setWeeklyProofMessage(result.message);
+    setWeeklyProofSharing(false);
+    if (result.success) {
+      setWeeklyProofDismissed(true);
+      if (weeklyProof.weekKey) {
+        await writeWeeklyProofCardDismissed({
+          journeyId: activeJourney.id,
+          weekKey: weeklyProof.weekKey
+        });
+      }
+    }
+    trackEvent("weekly_proof_share_completed", {
+      journeyId: activeJourney.id,
+      success: result.success,
+      code: result.code,
+      sourceKind: result.sourceKind,
+      cacheHit: result.cacheHit,
+      durationMs: Date.now() - startedAtMs,
+      progressDays: weeklyProof.progressDays,
+      clipCount: weeklyProof.clips.length
+    });
   }
 
   return (
     <>
       {activeJourney ? (
-        <View style={styles.container}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[
+            styles.sceneContent,
+            {
+              paddingTop: sceneTopPadding,
+              paddingHorizontal: sceneHorizontalPadding,
+              paddingBottom: sceneBottomPadding
+            }
+          ]}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
+          scrollIndicatorInsets={{ bottom: Math.max(130, insets.bottom + 110) }}
+        >
           <View
             style={[
-              styles.sceneContent,
-              {
-                paddingTop: sceneTopPadding,
-                paddingHorizontal: sceneHorizontalPadding,
-                paddingBottom: sceneBottomPadding
-              }
+              styles.contentTop,
+              revealFocusMode ? styles.contentTopRevealFocus : undefined
             ]}
           >
-            <View style={[styles.contentTop, revealFocusMode ? styles.contentTopRevealFocus : undefined]}>
-              {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-              <Animated.View
-                style={[
-                  styles.motionSection,
-                  {
-                    opacity: heroSectionReveal,
-                    transform: [
-                      {
-                        translateY: heroSectionReveal.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [motionTokens.reveal.primaryY, 0]
-                        })
-                      },
-                      {
-                        scale: heroSectionReveal.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [motionTokens.reveal.primaryScaleFrom, 1]
-                        })
-                      }
-                    ]
+            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+            <Animated.View
+              style={[
+                styles.motionSection,
+                {
+                  opacity: heroSectionReveal,
+                  transform: [
+                    {
+                      translateY: heroSectionReveal.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [motionTokens.reveal.primaryY, 0]
+                      })
+                    },
+                    {
+                      scale: heroSectionReveal.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [motionTokens.reveal.primaryScaleFrom, 1]
+                      })
+                    }
+                  ]
+                }
+              ]}
+            >
+              <View style={[styles.skillHeaderShell, revealFocusMode ? styles.skillHeaderShellRevealFocus : undefined]}>
+                {latestClipThumbnail ? (
+                  <Image
+                    source={{ uri: latestClipThumbnail }}
+                    style={styles.heroThumbnailBg}
+                    blurRadius={20}
+                    resizeMode="cover"
+                  />
+                ) : null}
+                <LinearGradient
+                  colors={
+                    latestClipThumbnail
+                      ? ["rgba(244,239,230,0.82)", "rgba(235,227,214,0.88)"]
+                      : revealFocusMode
+                        ? theme.gradients.heroSurfaceReveal
+                        : theme.gradients.heroSurface
                   }
-                ]}
-              >
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
                 <View style={[styles.skillHeader, revealFocusMode ? styles.skillHeaderRevealFocus : undefined]}>
-                  <Text style={[styles.sceneKicker, revealFocusMode ? styles.sceneKickerRevealFocus : undefined]}>Chapter {chapterNumber}</Text>
+                  <View style={styles.skillHeaderRail} />
+                  <Text style={[styles.sceneKicker, revealFocusMode ? styles.sceneKickerRevealFocus : undefined]}>
+                    {`chapter ${chapterNumber}`}
+                  </Text>
                   <View style={styles.skillHeaderTop}>
                     <Text
                       style={[
@@ -342,7 +643,7 @@ export function JourneysScreen({
                       ]}
                       numberOfLines={1}
                     >
-                      {activeJourney.title}
+                      {activeJourney.title.toLowerCase()}
                     </Text>
                     <TactilePressable
                       style={[
@@ -357,7 +658,7 @@ export function JourneysScreen({
                       accessibilityLabel="Manage journeys"
                       accessibilityHint="Create, switch, and close journeys"
                     >
-                      <Text style={styles.moreChipText}>Manage</Text>
+                      <Text style={styles.moreChipText}>manage</Text>
                     </TactilePressable>
                   </View>
                   <Animated.View style={{ transform: [{ scale: statPulse }] }}>
@@ -367,97 +668,244 @@ export function JourneysScreen({
                         compactMode ? styles.dayLineCompact : undefined,
                         tightMode ? styles.dayLineTight : undefined,
                         revealFocusMode ? styles.dayLineRevealFocus : undefined,
-                        { fontSize: dayLineSize, lineHeight: Math.round(dayLineSize * 1.14) }
+                        { fontSize: dayLineSize, lineHeight: Math.round(dayLineSize * 1.14) },
+                        chapterRemainingDays <= 3 && chapterRemainingDays > 0 ? { fontSize: dayLineSize + 2, lineHeight: Math.round((dayLineSize + 2) * 1.14) } : undefined,
+                        chapterRemainingDays === 1 && !chapterRevealReady ? { color: theme.colors.accent } : undefined,
+                        chapterRevealReady ? { color: theme.colors.accent, fontWeight: "900" } : undefined,
                       ]}
                     >
                       {chapterRevealReady
-                        ? `Reveal ready • Day ${chapterDisplayDay}/${chapterTargetDays}`
-                        : `Day ${chapterDisplayDay} of ${chapterTargetDays}`}
+                        ? `reveal ready • day ${chapterDisplayDay}/${chapterTargetDays}`
+                        : `day ${chapterDisplayDay} of ${chapterTargetDays}`}
                     </Text>
                     {!chapterRevealReady ? (
-                      <Text
-                        style={[
-                          styles.streakLine,
-                          compactMode ? styles.streakLineCompact : undefined,
-                          tightMode ? styles.streakLineTight : undefined,
-                          { fontSize: streakLineSize, lineHeight: Math.round(streakLineSize * 1.15) }
-                        ]}
-                      >
-                        🔥 {displayStreak} Day Streak
-                      </Text>
+                      <View style={displayStreak >= 7 ? styles.streakGlowWrap : undefined}>
+                        <Text
+                          style={[
+                            styles.streakLine,
+                            compactMode ? styles.streakLineCompact : undefined,
+                            tightMode ? styles.streakLineTight : undefined,
+                            { fontSize: streakLineSize, lineHeight: Math.round(streakLineSize * 1.15) },
+                            displayStreak >= 7 ? styles.streakOnFire : undefined,
+                            displayStreak >= 14 ? styles.streakIntense : undefined,
+                          ]}
+                        >
+                          {displayStreak >= 7 ? `🔥 ${displayStreak}-day streak` : `${displayStreak}-day consistency`}
+                        </Text>
+                      </View>
                     ) : null}
                   </Animated.View>
                 </View>
-                {celebration ? (
-                  <Animated.View style={[styles.celebrationBanner, { opacity: celebrationOpacity, transform: [{ translateY: celebrationY }] }]}>
-                    <Text style={styles.celebrationTitle}>{celebration.title}</Text>
-                    <Text style={styles.celebrationSubtitle}>{celebration.subtitle}</Text>
-                  </Animated.View>
-                ) : null}
-              </Animated.View>
-            </View>
-
-            <Animated.View
-              style={[
-                styles.sceneMain,
-                revealFocusMode ? styles.contentBottomRevealFocus : undefined,
-                {
-                  opacity: previewSectionReveal,
-                  transform: [
-                    {
-                      translateY: previewSectionReveal.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [motionTokens.reveal.primaryY, 0]
-                      })
-                    },
-                    {
-                      scale: previewSectionReveal.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [motionTokens.reveal.primaryScaleFrom, 1]
-                      })
-                    }
-                  ]
-                }
-              ]}
-            >
-              {!chapterRevealReady ? (
-                <View style={styles.chapterMetaRail}>
-                  <Text style={styles.chapterMetaPrimary} numberOfLines={1}>
-                    {chapterCountdownLabel}
-                  </Text>
-                </View>
-              ) : null}
-              <View style={[styles.chapterPrimaryAction, revealFocusMode ? styles.chapterPrimaryActionRevealFocus : undefined]}>
-                <ActionButton
-                  label={chapterRevealReady ? "Open Reveal" : practicedToday ? "Record Again Today" : "Record Today"}
-                  variant="primary"
-                  fullWidth
-                  dense={scenePrimaryDense}
-                  onPress={handlePrimaryAction}
-                />
               </View>
-              <View style={styles.sceneCalendarWrap}>
-                <PracticeCalendarMini
-                  clips={activeJourneyClips}
-                  now={now}
-                  compact={sceneCalendarCompact}
-                  hero
-                  fill={false}
-                  scene
-                  captureMode={activeJourney.captureMode}
-                  milestoneLengthDays={chapterTargetDays}
-                  milestoneProgressDays={chapterProgressDays}
-                  revealReady={chapterRevealReady}
-                  onReRecordToday={() => {
-                    if (!activeJourney) return;
-                    trackEvent("record_tapped", { journeyId: activeJourney.id, context: "calendar_today_rerecord" });
-                    setRecorderJourneyId(activeJourney.id);
-                  }}
-                />
-              </View>
+              {/* Celebration banner replaced by calendar cell animation */}
             </Animated.View>
           </View>
-        </View>
+
+          <Animated.View
+            style={[
+              styles.sceneMain,
+              revealFocusMode ? styles.contentBottomRevealFocus : undefined,
+              {
+                opacity: previewSectionReveal,
+                transform: [
+                  {
+                    translateY: previewSectionReveal.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [motionTokens.reveal.primaryY, 0]
+                    })
+                  },
+                  {
+                    scale: previewSectionReveal.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [motionTokens.reveal.primaryScaleFrom, 1]
+                    })
+                  }
+                ]
+              }
+            ]}
+          >
+            {/* Progress bar */}
+            <View style={styles.progressBarWrap}>
+              <View style={styles.progressBarRow}>
+                <View style={styles.progressBarTrack}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      { width: `${Math.min(100, Math.round((chapterProgressDays / chapterTargetDays) * 100))}%` },
+                      chapterRevealReady ? styles.progressBarFillComplete : undefined,
+                    ]}
+                  />
+                </View>
+                <Text style={styles.progressBarLabel}>
+                  {chapterRevealReady
+                    ? "✓"
+                    : `${chapterProgressDays}/${chapterTargetDays}`}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.chapterPrimaryAction, revealFocusMode ? styles.chapterPrimaryActionRevealFocus : undefined]}>
+              <ActionButton
+                label={primaryActionLabel}
+                variant="primary"
+                fullWidth
+                dense={scenePrimaryDense}
+                noTopMargin
+                onPress={handlePrimaryAction}
+              />
+            </View>
+            {/* @hidden */ false && (missedDayRecovery as NonNullable<typeof missedDayRecovery>) ? (
+              <View style={styles.recoveryCard}>
+                <Text style={styles.recoveryTitle}>
+                  {missedDayRecovery!.missedDays === 1 ? "missed one day?" : `missed ${missedDayRecovery!.missedDays} days?`}
+                </Text>
+                <Text style={styles.recoveryCopy}>log a quick take and reset</Text>
+                <TactilePressable
+                  style={styles.recoveryButton}
+                  onPress={() => {
+                    if (!activeJourney) return;
+                    trackEvent("record_tapped", { journeyId: activeJourney.id, context: "missed_day_recovery" });
+                    setRecorderJourneyId(activeJourney.id);
+                  }}
+                >
+                  <Text style={styles.recoveryButtonText}>log quick take</Text>
+                </TactilePressable>
+              </View>
+            ) : null}
+            {/* @hidden */ false && (autoReminderSuggestion as NonNullable<typeof autoReminderSuggestion>) ? (
+              <View style={styles.autoReminderCard}>
+                <Text style={styles.autoReminderTitle}>keep your streak easy</Text>
+                <Text style={styles.autoReminderCopy}>
+                  set a daily cue at {suggestedReminderLabel ?? "this time"} based on when you logged your first take?
+                </Text>
+                <View style={styles.autoReminderActions}>
+                  <TactilePressable
+                    style={styles.autoReminderEnable}
+                    onPress={() => {
+                      onDailyMomentSettingsChange({
+                        ...dailyMomentSettings,
+                        enabled: true,
+                        hour: autoReminderSuggestion!.hour,
+                        minute: autoReminderSuggestion!.minute
+                      });
+                      trackEvent("daily_moment_auto_setup_enabled", {
+                        journeyId: activeJourney?.id ?? null,
+                        hour: autoReminderSuggestion!.hour,
+                        minute: autoReminderSuggestion!.minute
+                      });
+                      void acknowledgeAutoReminderSuggestion();
+                    }}
+                  >
+                    <Text style={styles.autoReminderEnableText}>enable</Text>
+                  </TactilePressable>
+                  <TactilePressable
+                    style={styles.autoReminderDismiss}
+                    onPress={() => {
+                      trackEvent("daily_moment_auto_setup_dismissed", {
+                        journeyId: activeJourney?.id ?? null
+                      });
+                      void acknowledgeAutoReminderSuggestion();
+                    }}
+                  >
+                    <Text style={styles.autoReminderDismissText}>no thanks</Text>
+                  </TactilePressable>
+                </View>
+              </View>
+            ) : null}
+            {/* @hidden */ false && (weeklyProof as NonNullable<typeof weeklyProof>) && !weeklyProofDismissed ? (
+              <View style={styles.weeklyProofCard}>
+                <Text style={styles.weeklyProofTitle}>weekly proof card</Text>
+                <Text style={styles.weeklyProofCopy}>
+                  {weeklyProof!.weekLabel} • {weeklyProof!.progressDays}/7 days captured
+                </Text>
+                <TactilePressable
+                  style={[styles.weeklyProofButton, (!weeklyProof!.shareReady || weeklyProofSharing) ? styles.weeklyProofButtonDisabled : undefined]}
+                  onPress={() => {
+                    void handleShareWeeklyProof();
+                  }}
+                  disabled={!weeklyProof!.shareReady || weeklyProofSharing}
+                >
+                  <Text style={styles.weeklyProofButtonText}>
+                    {weeklyProofSharing ? "preparing..." : weeklyProof!.shareReady ? "share weekly recap" : "log one more take"}
+                  </Text>
+                </TactilePressable>
+                {weeklyProofMessage ? <Text style={styles.weeklyProofMessage}>{weeklyProofMessage}</Text> : null}
+              </View>
+            ) : null}
+            {false && (<View style={styles.evolutionCard}>
+              <Text style={styles.evolutionTitle}>evolution strip</Text>
+              {evolutionMoments.length >= 2 ? (
+                <>
+                  <TactilePressable
+                    style={styles.evolutionThumbRow}
+                    onPress={() => {
+                      if (!activeJourney || !compareReady) return;
+                      trackEvent("comparison_reveal_opened", {
+                        journeyId: activeJourney.id,
+                        source: "journeys_evolution_strip"
+                      });
+                      onOpenProgress(activeJourney.id, { openReveal: true });
+                    }}
+                    disabled={!compareReady}
+                  >
+                    {evolutionMoments.map((moment) => {
+                      const previewUri = moment.clip.thumbnailUrl ?? (moment.clip.captureType === "photo" ? moment.clip.videoUrl : null);
+                      return (
+                        <View key={`${moment.clip.id}-${moment.label}`} style={styles.evolutionThumbShell}>
+                          {previewUri ? (
+                            <Image source={{ uri: previewUri }} style={styles.evolutionThumbImage} resizeMode="cover" />
+                          ) : (
+                            <View style={styles.evolutionThumbFallback}>
+                              <Text style={styles.evolutionThumbFallbackText}>take</Text>
+                            </View>
+                          )}
+                          <View style={styles.evolutionThumbLabelWrap}>
+                            <Text style={styles.evolutionThumbLabelText}>{moment.label}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </TactilePressable>
+                  <Text style={styles.evolutionCopy}>tap strip to open compare.</Text>
+                </>
+              ) : (
+                <Text style={styles.evolutionCopy}>add one more take to unlock compare.</Text>
+              )}
+            </View>)}
+            {chapterRevealReady ? (
+              <View style={styles.protocolCard}>
+                <Text style={styles.protocolStatus}>chapter done. reveal's ready.</Text>
+              </View>
+            ) : null}
+            {activeJourney && (<Animated.View style={[styles.sceneCalendarWrap, {
+              opacity: calendarSectionReveal,
+              transform: [{
+                translateY: calendarSectionReveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [14, 0]
+                })
+              }]
+            }]}>
+              <PracticeCalendarMini
+                clips={activeJourneyClips}
+                now={now}
+                compact={sceneCalendarCompact}
+                hero
+                fill={false}
+                scene
+                captureMode={activeJourney.captureMode}
+                milestoneLengthDays={chapterTargetDays}
+                milestoneProgressDays={chapterProgressDays}
+                revealReady={chapterRevealReady}
+                saveSignal={activeJourneyClips.length}
+                onReRecordToday={() => {
+                  if (!activeJourney) return;
+                  trackEvent("record_tapped", { journeyId: activeJourney.id, context: "calendar_today_rerecord" });
+                  setRecorderJourneyId(activeJourney.id);
+                }}
+              />
+            </Animated.View>)}
+          </Animated.View>
+        </ScrollView>
       ) : (
         <ScrollView
           style={styles.container}
@@ -475,12 +923,12 @@ export function JourneysScreen({
           <View style={styles.contentTop}>
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
             {statusMessage && !celebration ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
-            {loading ? <Text style={styles.mutedText}>Loading your practice space...</Text> : null}
+            {/* Loading text removed — glitchy on tab switch */}
             {!loading ? (
               <View style={styles.emptyWrap}>
-                <Text style={styles.emptyTitle}>Your journey starts today.</Text>
-                <Text style={styles.emptySubtitle}>Create a skill and record your first practice clip.</Text>
-                <ActionButton label="Create First Journey" variant="primary" fullWidth dense={compactMode} onPress={() => setManageOpen(true)} />
+                <Text style={styles.emptyTitle}>start something.</Text>
+                <Text style={styles.emptySubtitle}>pick a skill.</Text>
+                <ActionButton label="start first journey" variant="primary" fullWidth dense={compactMode} onPress={() => setManageOpen(true)} />
               </View>
             ) : null}
           </View>
@@ -515,11 +963,13 @@ export function JourneysScreen({
         newGoalText={newGoalText}
         newMilestoneLengthDays={newMilestoneLengthDays}
         newCaptureMode={newCaptureMode}
+        newSkillPack={newSkillPack}
         onTitleChange={setNewTitle}
         onCategoryChange={setNewCategory}
         onGoalTextChange={setNewGoalText}
         onMilestoneLengthChange={setNewMilestoneLengthDays}
         onCaptureModeChange={setNewCaptureMode}
+        onSkillPackChange={setNewSkillPack}
         onClose={() => setManageOpen(false)}
         onCreateJourney={() => {
           void handleCreateJourney();
@@ -542,20 +992,66 @@ export function JourneysScreen({
         }}
       />
 
+      {activeJourney && !chapterRevealReady ? (
+        <Animated.View style={{
+          position: "absolute",
+          bottom: 24,
+          alignSelf: "center",
+          zIndex: 100,
+          transform: [{
+            translateY: fabBob.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, -4]
+            })
+          }]
+        }}>
+          <TactilePressable
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              backgroundColor: theme.colors.accent,
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: theme.colors.accent,
+              shadowOpacity: 0.3,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 6,
+            }}
+            pressScale={0.9}
+            onPress={() => {
+              triggerSelectionHaptic();
+              setRecorderJourneyId(activeJourney.id);
+            }}
+          >
+            <Text style={{ color: "#fff", fontSize: 28, fontWeight: "300", marginTop: -2 }}>+</Text>
+          </TactilePressable>
+        </Animated.View>
+      ) : null}
+
       <PracticeRecorder
         visible={Boolean(recorderJourneyId)}
         saving={clipSaving}
         statusMessage={recorderStatusMessage}
-        journeyTitle={recorderJourney?.title ?? "Practice"}
+        journeyTitle={recorderJourney?.title ?? "practice"}
         dayNumber={recorderDay}
         captureType={recorderCaptureType}
-        referenceClipUrl={recorderReferenceClipUrl}
+        skillPack={recorderJourney?.skillPack ?? "fitness"}
         onCancel={() => {
           if (clipSaving) return;
           setRecorderJourneyId(null);
           setRecorderStatusMessage(null);
         }}
-        onSave={handleSaveRecordedClip}
+        onSave={async (payload) => {
+          const result = await handleSaveRecordedClip(payload);
+          if (result.success) {
+            console.log("[JourneysScreen] Clip saved, bumping recordingsRevision");
+            onRecordingsRevisionBump?.();
+          }
+          return result;
+        }}
+        referenceClipUrl={recorderReferenceClipUrl}
       />
     </>
   );
@@ -569,28 +1065,29 @@ const styles = StyleSheet.create({
     flexGrow: 1
   },
   sceneContent: {
-    flex: 1
+    flexGrow: 1
   },
   contentTop: {
-    gap: 6
+    gap: 14
   },
   contentTopLocked: {
-    gap: 0
+    gap: 6
   },
   contentTopReadyCompact: {
-    gap: 2
+    gap: 8
   },
   contentTopRevealFocus: {
-    gap: 4
+    gap: 3
   },
   contentBottom: {
     marginTop: 10
   },
   sceneMain: {
-    marginTop: 10,
+    marginTop: 6,
     minHeight: 0
   },
   sceneCalendarWrap: {
+    marginTop: 4,
     minHeight: 0
   },
   contentBottomReadyCompact: {
@@ -605,8 +1102,8 @@ const styles = StyleSheet.create({
     minHeight: 0
   },
   celebrationBanner: {
-    marginTop: -2,
-    borderRadius: 16,
+    marginTop: 2,
+    borderRadius: theme.shape.cardRadiusMd,
     backgroundColor: "rgba(13,159,101,0.14)",
     borderWidth: 1,
     borderColor: "rgba(13,159,101,0.36)",
@@ -617,14 +1114,16 @@ const styles = StyleSheet.create({
     color: theme.colors.success,
     fontWeight: "800",
     fontSize: 17,
-    textAlign: "center"
+    textAlign: "center",
+    fontFamily: theme.typography.heading
   },
   celebrationSubtitle: {
     marginTop: 2,
     color: theme.colors.textSecondary,
     fontWeight: "700",
     fontSize: 13,
-    textAlign: "center"
+    textAlign: "center",
+    fontFamily: theme.typography.body
   },
   errorText: {
     marginTop: 12,
@@ -643,26 +1142,62 @@ const styles = StyleSheet.create({
   motionSection: {
     width: "100%"
   },
+  skillHeaderShell: {
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 0,
+    borderColor: "transparent",
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 14,
+    shadowColor: "#000000",
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 0,
+    overflow: "hidden"
+  },
+  heroThumbnailBg: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.35
+  },
+  skillHeaderShellRevealFocus: {
+    borderRadius: theme.shape.cardRadiusMd,
+    borderColor: "#121212",
+    paddingHorizontal: 11,
+    paddingTop: 9,
+    paddingBottom: 9,
+    shadowOpacity: 0.18,
+    shadowRadius: 0,
+    shadowOffset: { width: 3, height: 3 },
+    elevation: 0
+  },
   skillHeader: {
-    gap: 6
+    gap: 10
+  },
+  skillHeaderRail: {
+    width: 56,
+    height: 5,
+    borderRadius: 0,
+    backgroundColor: "#ff5a1f"
   },
   skillHeaderRevealFocus: {
     gap: 5
   },
   sceneKicker: {
-    color: theme.colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 13,
+    color: "#2d2d2d",
+    fontSize: 15,
+    lineHeight: 18,
     fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.68
+    letterSpacing: 0.3,
+
+    fontFamily: theme.typography.label
   },
   sceneKickerRevealFocus: {
-    color: theme.colors.textSecondary,
-    opacity: 0.88,
+    color: "#2d2d2d",
+    opacity: 1,
     fontSize: 10,
     lineHeight: 12,
-    letterSpacing: 0.55
+    letterSpacing: 1
   },
   skillHeaderTop: {
     flexDirection: "row",
@@ -672,10 +1207,11 @@ const styles = StyleSheet.create({
   },
   skillName: {
     flex: 1,
-    color: theme.colors.textPrimary,
-    fontSize: 25,
-    lineHeight: 29,
-    fontWeight: "800"
+    color: "#101010",
+    fontSize: 48,
+    lineHeight: 52,
+    fontWeight: "800",
+    fontFamily: theme.typography.display
   },
   skillNameCompact: {
     fontSize: 24,
@@ -686,49 +1222,53 @@ const styles = StyleSheet.create({
     lineHeight: 24
   },
   moreChip: {
-    minHeight: 40,
-    borderRadius: 20,
+    minHeight: 38,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.72)",
-    backgroundColor: "rgba(239,248,255,0.54)",
+    borderColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "rgba(0,0,0,0.06)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    shadowColor: "#102f58",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 }
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    shadowColor: "transparent",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 }
   },
   moreChipRevealFocus: {
-    minHeight: 38,
-    borderRadius: 19,
-    borderColor: "rgba(255,255,255,0.74)",
-    backgroundColor: "rgba(255,255,255,0.32)",
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    minHeight: 34,
+    borderRadius: 2,
+    borderColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "rgba(0,0,0,0.06)",
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
     paddingHorizontal: 12,
     paddingVertical: 7
   },
   moreChipCompact: {
-    minHeight: 34,
-    borderRadius: 17,
+    minHeight: 30,
+    borderRadius: Math.max(theme.shape.chipRadius - 1, 8),
     paddingHorizontal: 10,
     paddingVertical: 6
   },
   moreChipText: {
-    color: theme.colors.textPrimary,
-    fontWeight: "800",
-    fontSize: 12,
-    lineHeight: 14,
-    letterSpacing: 0.2
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    fontSize: 14,
+    lineHeight: 17,
+    letterSpacing: 0.15,
+
+    fontFamily: theme.typography.label
   },
   dayLine: {
-    color: theme.colors.textPrimary,
-    fontSize: 18,
-    lineHeight: 21,
-    fontWeight: "800"
+    color: "#111111",
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "800",
+    letterSpacing: 0.12,
+    fontFamily: theme.typography.display
   },
   dayLineCompact: {
     fontSize: 20,
@@ -739,21 +1279,24 @@ const styles = StyleSheet.create({
     lineHeight: 21
   },
   dayLineRevealFocus: {
-    color: theme.colors.textPrimary,
+    color: "#111111",
     fontWeight: "800"
   },
   compactStreakLine: {
     marginTop: 2,
-    color: theme.colors.accentStrong,
+    color: "#ea3d00",
     fontSize: 14,
     lineHeight: 17,
     fontWeight: "800"
   },
   streakLine: {
-    color: theme.colors.accentStrong,
-    fontSize: 14,
-    lineHeight: 17,
-    fontWeight: "800"
+    marginTop: 4,
+    color: "#ea3d00",
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "800",
+    letterSpacing: 0.24,
+    fontFamily: theme.typography.heading
   },
   streakLineCompact: {
     fontSize: 16,
@@ -763,30 +1306,76 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 17
   },
+  streakGlowWrap: {
+    backgroundColor: "rgba(255,90,31,0.08)",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: "flex-start",
+    marginTop: 2,
+  },
+  streakOnFire: {
+    color: "#ff5a1f",
+    fontWeight: "900",
+  },
+  streakIntense: {
+    color: "#ea3d00",
+    fontSize: 16,
+  },
   captureModeRow: {
     marginTop: 6,
     flexDirection: "row",
     gap: 8
   },
   captureModeChip: {
-    borderRadius: 999,
+    borderRadius: 2,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.68)",
-    backgroundColor: "rgba(255,255,255,0.2)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,221,0.92)",
     paddingHorizontal: 12,
     paddingVertical: 6
   },
   captureModeChipSelected: {
-    borderColor: "rgba(14,99,255,0.62)",
-    backgroundColor: "rgba(14,99,255,0.2)"
+    borderColor: "#111111",
+    backgroundColor: "rgba(255,90,31,0.22)"
   },
   captureModeChipText: {
-    color: theme.colors.textSecondary,
+    color: "#222222",
     fontSize: 12,
     fontWeight: "800"
   },
   captureModeChipTextSelected: {
     color: theme.colors.accentStrong
+  },
+  progressBarWrap: {
+    paddingHorizontal: 4,
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  progressBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  progressBarTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    borderRadius: 4,
+    backgroundColor: theme.colors.accent,
+  },
+  progressBarFillComplete: {
+    backgroundColor: "#E8450A",
+  },
+  progressBarLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.35)",
   },
   chapterScene: {
     gap: 14
@@ -815,26 +1404,317 @@ const styles = StyleSheet.create({
     flex: 1
   },
   chapterMetaRail: {
-    marginBottom: 4,
+    marginBottom: 3,
     gap: 2
   },
   chapterPrimaryAction: {
-    marginBottom: 14
+    marginBottom: 6
   },
   chapterPrimaryActionRevealFocus: {
-    marginBottom: 16
+    marginBottom: 6
+  },
+  recoveryCard: {
+    marginBottom: 6,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(245,236,226,0.98)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 6
+  },
+  recoveryTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "800",
+
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
+  },
+  recoveryCopy: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
+  },
+  recoveryButton: {
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.24)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 38,
+    paddingHorizontal: 10
+  },
+  recoveryButtonText: {
+    color: "#130900",
+    fontWeight: "800",
+    fontSize: 12,
+
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
+  },
+  autoReminderCard: {
+    marginBottom: 6,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(241,233,222,0.98)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 6
+  },
+  autoReminderTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "800",
+
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
+  },
+  autoReminderCopy: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
+  },
+  autoReminderActions: {
+    flexDirection: "row",
+    gap: 8
+  },
+  autoReminderEnable: {
+    flex: 1,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.24)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 38,
+    paddingHorizontal: 10
+  },
+  autoReminderEnableText: {
+    color: "#130900",
+    fontWeight: "800",
+    fontSize: 12,
+
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
+  },
+  autoReminderDismiss: {
+    flex: 1,
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,255,255,0.42)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 38,
+    paddingHorizontal: 10
+  },
+  autoReminderDismissText: {
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    fontSize: 12,
+
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
+  },
+  weeklyProofCard: {
+    marginBottom: 6,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.98)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 6
+  },
+  weeklyProofTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "800",
+
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
+  },
+  weeklyProofCopy: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
+  },
+  weeklyProofButton: {
+    borderRadius: theme.shape.buttonRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.24)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 38,
+    paddingHorizontal: 10
+  },
+  weeklyProofButtonDisabled: {
+    opacity: 0.66
+  },
+  weeklyProofButtonText: {
+    color: "#130900",
+    fontWeight: "800",
+    fontSize: 12,
+
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
+  },
+  weeklyProofMessage: {
+    color: "#2d2d2d",
+    fontWeight: "700",
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: theme.typography.body
+  },
+  evolutionCard: {
+    marginBottom: 6,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.98)",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 6
+  },
+  evolutionTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "800",
+
+    letterSpacing: 0.85,
+    fontFamily: theme.typography.label
+  },
+  evolutionThumbRow: {
+    flexDirection: "row",
+    gap: 8
+  },
+  evolutionThumbShell: {
+    flex: 1,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    overflow: "hidden",
+    backgroundColor: "rgba(238,230,219,0.92)",
+    aspectRatio: 0.75
+  },
+  evolutionThumbImage: {
+    width: "100%",
+    height: "100%"
+  },
+  evolutionThumbFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(228,219,206,0.95)"
+  },
+  evolutionThumbFallbackText: {
+    color: "#2b2b2b",
+    fontSize: 11,
+    fontWeight: "800",
+
+    letterSpacing: 0.7,
+    fontFamily: theme.typography.label
+  },
+  evolutionThumbLabelWrap: {
+    position: "absolute",
+    left: 6,
+    top: 6,
+    borderRadius: theme.shape.pillRadius,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    paddingHorizontal: 7,
+    paddingVertical: 3
+  },
+  evolutionThumbLabelText: {
+    color: "#111111",
+    fontWeight: "800",
+    fontSize: 10,
+
+    letterSpacing: 0.8,
+    fontFamily: theme.typography.label
+  },
+  evolutionCopy: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
+  },
+  protocolCard: {
+    marginTop: 8,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 0,
+    borderColor: "transparent",
+    backgroundColor: "transparent",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6
+  },
+  protocolKicker: {
+    color: theme.colors.textSecondary,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "800",
+
+    letterSpacing: 0.3,
+    fontFamily: theme.typography.label
+  },
+  protocolTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: 17,
+    lineHeight: 20,
+    fontWeight: "800",
+    fontFamily: theme.typography.heading
+  },
+  protocolCopy: {
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
+  },
+  protocolStatus: {
+    color: theme.colors.textPrimary,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "700",
+    fontFamily: theme.typography.body
+  },
+  protocolMeta: {
+    color: "#2f2f2f",
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   chapterMetaPrimary: {
-    color: theme.colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "800"
+    color: "#2b2b2b",
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    fontFamily: theme.typography.label
   },
   criticalFooterRow: {
-    borderRadius: 14,
+    borderRadius: 2,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.68)",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(240,233,223,0.96)",
     paddingHorizontal: 11,
     paddingVertical: 9
   },
@@ -846,33 +1726,33 @@ const styles = StyleSheet.create({
   },
   criticalFooterSubtitle: {
     marginTop: 2,
-    color: theme.colors.textSecondary,
+    color: "#2b2b2b",
     fontSize: 12,
     lineHeight: 15,
     fontWeight: "600"
   },
   criticalFooterAction: {
     marginTop: 8,
-    borderRadius: 10,
+    borderRadius: 2,
     borderWidth: 1,
-    borderColor: "rgba(14,99,255,0.42)",
-    backgroundColor: "rgba(14,99,255,0.18)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,90,31,0.24)",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 8,
     paddingHorizontal: 10
   },
   criticalFooterActionText: {
-    color: theme.colors.accentStrong,
+    color: "#111111",
     fontSize: 13,
     fontWeight: "800"
   },
   emptyWrap: {
     marginTop: 26,
-    borderRadius: 22,
+    borderRadius: 2,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.72)",
-    backgroundColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(244,238,229,0.96)",
     padding: 16
   },
   emptyTitle: {
@@ -883,7 +1763,7 @@ const styles = StyleSheet.create({
   },
   emptySubtitle: {
     marginTop: 7,
-    color: theme.colors.textSecondary,
+    color: "#2b2b2b",
     fontSize: 16,
     fontWeight: "600"
   },

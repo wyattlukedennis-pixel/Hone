@@ -46,6 +46,6 @@ const styles = StyleSheet.create({
     width: "100%",
     borderRadius: 0,
     overflow: "hidden",
-    backgroundColor: "#0d2740"
+    backgroundColor: "#121212"
   }
 });

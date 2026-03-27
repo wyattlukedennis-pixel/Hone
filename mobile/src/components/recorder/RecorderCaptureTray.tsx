@@ -1,6 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
-import { theme } from "../../theme";
+import { TactilePressable } from "../TactilePressable";
 import { triggerSelectionHaptic } from "../../utils/feedback";
 
 type RecorderCaptureTrayProps = {
@@ -31,43 +31,51 @@ export function RecorderCaptureTray({
   onRetake,
   onSave
 }: RecorderCaptureTrayProps) {
-  const noun = captureType === "photo" ? "Photo" : "Clip";
+  const noun = captureType === "photo" ? "photo" : "take";
+  const detail = captureType === "photo" ? "captured and ready to save." : `length ${formatDuration(durationMs)}`;
+
   return (
     <View style={styles.captureCard}>
-      <Text style={styles.captureTitle}>{noun} captured ({formatDuration(durationMs)})</Text>
+      <Text style={styles.captureTitle}>{noun} ready</Text>
+      <Text style={styles.captureMeta}>{detail}</Text>
       {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
       {saveErrorMessage ? <Text style={styles.errorText}>{saveErrorMessage}</Text> : null}
       <View style={styles.captureActions}>
-        <Pressable
-          style={({ pressed }) => [styles.ghostButton, pressed && !recording && !saving ? styles.buttonPressed : undefined]}
-          onPress={() => {
-            triggerSelectionHaptic();
-            onCancel();
-          }}
-          disabled={recording || saving}
-        >
-          <Text style={styles.ghostButtonText}>Cancel</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.ghostButton, pressed && !saving ? styles.buttonPressed : undefined]}
-          onPress={() => {
-            triggerSelectionHaptic();
-            onRetake();
-          }}
-          disabled={saving}
-        >
-          <Text style={styles.ghostButtonText}>Retake</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.saveButton, saving ? styles.disabled : undefined, pressed && !saving ? styles.buttonPressed : undefined]}
+        <TactilePressable
+          style={styles.saveButton}
+          pressScale={0.96}
           onPress={() => {
             triggerSelectionHaptic();
             onSave();
           }}
           disabled={saving}
         >
-          <Text style={styles.saveText}>{saving ? "Saving..." : `Save ${noun}`}</Text>
-        </Pressable>
+          <Text style={styles.saveText}>{saving ? "saving..." : `save ${noun}`}</Text>
+        </TactilePressable>
+      </View>
+      <View style={styles.secondaryActions}>
+        <TactilePressable
+          style={styles.secondaryButton}
+          pressScale={0.97}
+          onPress={() => {
+            triggerSelectionHaptic();
+            onRetake();
+          }}
+          disabled={saving}
+        >
+          <Text style={styles.secondaryText}>retake</Text>
+        </TactilePressable>
+        <TactilePressable
+          style={styles.secondaryButton}
+          pressScale={0.97}
+          onPress={() => {
+            triggerSelectionHaptic();
+            onCancel();
+          }}
+          disabled={recording || saving}
+        >
+          <Text style={styles.secondaryText}>discard</Text>
+        </TactilePressable>
       </View>
     </View>
   );
@@ -75,59 +83,58 @@ export function RecorderCaptureTray({
 
 const styles = StyleSheet.create({
   captureCard: {
-    borderRadius: 20,
-    backgroundColor: "rgba(8,16,30,0.62)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.32)",
-    padding: 12
+    borderRadius: 24,
+    backgroundColor: "rgba(0,0,0,0.04)",
+    padding: 20,
+    alignSelf: "stretch",
   },
   captureTitle: {
-    color: "#edf5ff",
-    fontSize: 18,
+    color: "#101010",
+    fontSize: 20,
     fontWeight: "800"
   },
+  captureMeta: {
+    marginTop: 4,
+    color: "rgba(0,0,0,0.4)",
+    fontSize: 14,
+    fontWeight: "600"
+  },
   statusText: {
-    marginTop: 6,
+    marginTop: 8,
     color: "#7ce2b7",
     fontWeight: "700"
   },
   errorText: {
-    marginTop: 6,
+    marginTop: 8,
     color: "#ff8da0",
     fontWeight: "700"
   },
   captureActions: {
-    marginTop: 12,
-    flexDirection: "row",
-    gap: 10,
-    flexWrap: "wrap"
-  },
-  ghostButton: {
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(255,255,255,0.16)",
-    paddingVertical: 10,
-    paddingHorizontal: 14
-  },
-  ghostButtonText: {
-    color: "#e7f1ff",
-    fontWeight: "700"
+    marginTop: 16,
   },
   saveButton: {
-    borderRadius: 13,
-    backgroundColor: theme.colors.accent,
-    paddingVertical: 10,
-    paddingHorizontal: 14
+    borderRadius: 24,
+    backgroundColor: "#E8450A",
+    paddingVertical: 16,
+    alignItems: "center",
   },
   saveText: {
-    color: "#edf5ff",
-    fontWeight: "800"
+    color: "#ffffff",
+    fontWeight: "800",
+    fontSize: 17,
   },
-  disabled: {
-    opacity: 0.65
+  secondaryActions: {
+    marginTop: 12,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 24,
   },
-  buttonPressed: {
-    transform: [{ scale: 0.98 }]
-  }
+  secondaryButton: {
+    paddingVertical: 8,
+  },
+  secondaryText: {
+    color: "rgba(0,0,0,0.4)",
+    fontWeight: "600",
+    fontSize: 14,
+  },
 });
