@@ -89,3 +89,17 @@ function findNearestUnused(
   }
   return null;
 }
+
+/**
+ * Returns ALL photo clips for a journey, sorted ascending.
+ * Used for photo timelapse reveal — no sampling, every photo appears.
+ */
+export async function buildTimelapseClips(
+  token: string,
+  journeyId: string
+): Promise<ReelClip[]> {
+  const { clips } = await listClips(token, journeyId);
+  const photoClips = clips.filter((c) => c.captureType === "photo");
+  const ascending = sortClipsAscending(photoClips);
+  return ascending.map((clip, index) => toReelClip(clip, index + 1));
+}

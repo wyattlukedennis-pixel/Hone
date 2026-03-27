@@ -17,8 +17,10 @@ import { triggerMilestoneHaptic, triggerSelectionHaptic } from "../utils/feedbac
 import { hasRevealExportPurchase } from "../utils/purchases";
 import { prepareReelAsset } from "../utils/reelExport";
 import { buildRevealComparisonPlanFromRange, buildRevealStoryline } from "../utils/progress";
+import { buildTimelapseClips } from "../utils/reelBuilder";
 import { useReducedMotion } from "../utils/useReducedMotion";
 import ChapterRevealScreen from "./progress/ChapterRevealScreen";
+import ReelPreviewScreen from "./progress/ReelPreviewScreen";
 import { ComparisonRevealModal } from "./progress/ComparisonRevealModal";
 import { NoJourneyCard } from "./progress/NoJourneyCard";
 import { useProgressState } from "./progress/useProgressState";
@@ -112,6 +114,10 @@ export function ProgressScreen({
   const pastRevealOpenCooldownUntilRef = useRef(0);
   const journeyFinaleUnlockHandledJourneyRef = useRef<string | null>(null);
   const quickReelPrewarmKeyRef = useRef<string | null>(null);
+  const [reelPreviewVisible, setReelPreviewVisible] = useState(false);
+  const [reelMode, setReelMode] = useState<"video" | "timelapse">("video");
+  const [timelapsePhotos, setTimelapsePhotos] = useState<Array<{ uri: string; label: string }>>([]);
+  const [composedDaySpan, setComposedDaySpan] = useState(0);
 
   const {
     journeys,
@@ -163,6 +169,10 @@ export function ProgressScreen({
     journeyFinaleUnlockHandledJourneyRef.current = null;
     finaleUnlockPulse.setValue(1);
     quickReelPrewarmKeyRef.current = null;
+    setReelPreviewVisible(false);
+    setReelMode("video");
+    setTimelapsePhotos([]);
+    setComposedDaySpan(0);
     setSelectedPastReveal(null);
     setPastRevealModalOpen(false);
     setChapterHistoryOpen(false);
@@ -735,6 +745,24 @@ export function ProgressScreen({
     handledRevealSignalRef.current = openRevealSignal;
     if (!comparison || !selectedJourney) return;
     if (revealReady) {
+      if (selectedJourney.captureMode === "photo") {
+        (async () => {
+          const clips = await buildTimelapseClips(token, selectedJourney.id);
+          if (clips.length > 0) {
+            setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+            setReelMode("timelapse");
+            setComposedDaySpan(clips.length);
+            setReelPreviewVisible(true);
+            trackEvent("milestone_reveal_opened", {
+              journeyId: selectedJourney.id,
+              chapter: chapterNumber,
+              source: "practice_deep_link",
+              mode: "timelapse"
+            });
+          }
+        })();
+        return;
+      }
       setChapterRevealOpen(true);
       trackEvent("milestone_reveal_opened", {
         journeyId: selectedJourney.id,
@@ -749,7 +777,7 @@ export function ProgressScreen({
         source: "practice_compare_deep_link"
       });
     }
-  }, [openRevealSignal, revealReady, comparison?.thenClip.id, comparison?.nowClip.id, selectedJourney?.id, chapterNumber, setCompareModalOpen]);
+  }, [openRevealSignal, revealReady, comparison?.thenClip.id, comparison?.nowClip.id, selectedJourney?.id, selectedJourney?.captureMode, chapterNumber, setCompareModalOpen, token]);
 
   useEffect(() => {
     if (!progressEntrySignal) return;
@@ -1017,7 +1045,18 @@ export function ProgressScreen({
                         <TactilePressable
                           style={styles.watchRevealLink}
                           pressScale={0.97}
-                          onPress={() => {
+                          onPress={async () => {
+                            if (selectedJourney.captureMode === "photo") {
+                              const clips = await buildTimelapseClips(token, selectedJourney.id);
+                              if (clips.length > 0) {
+                                setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+                                setReelMode("timelapse");
+                                setComposedDaySpan(clips.length);
+                                setReelPreviewVisible(true);
+                                trackEvent("chapter_reveal_opened", { journeyId: selectedJourney.id, chapterNumber, mode: "timelapse" });
+                                return;
+                              }
+                            }
                             setChapterRevealOpen(true);
                             trackEvent("chapter_reveal_opened", { journeyId: selectedJourney.id, chapterNumber });
                           }}
@@ -1028,8 +1067,18 @@ export function ProgressScreen({
                     ) : (
                       <TactilePressable
                         style={[styles.revealCapsulePrimary]}
-                        onPress={() => {
+                        onPress={async () => {
                           if (compareReady) {
+                            if (selectedJourney.captureMode === "photo") {
+                              const clips = await buildTimelapseClips(token, selectedJourney.id);
+                              if (clips.length > 0) {
+                                setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+                                setReelMode("timelapse");
+                                setComposedDaySpan(clips.length);
+                                setReelPreviewVisible(true);
+                                return;
+                              }
+                            }
                             openMirrorComparison(null);
                             return;
                           }
@@ -1314,6 +1363,16 @@ export function ProgressScreen({
         </Animated.View>
       </Modal>
 
+      <ReelPreviewScreen
+        visible={reelPreviewVisible}
+        firstClipUri={comparison?.thenClip.videoUrl ?? null}
+        latestClipUri={comparison?.nowClip.videoUrl ?? null}
+        daySpan={reelMode === "timelapse" ? composedDaySpan : chapterProgressDays}
+        goalText={selectedJourney?.goalText ?? null}
+        onClose={() => setReelPreviewVisible(false)}
+        mode={reelMode}
+        timelapsePhotos={reelMode === "timelapse" ? timelapsePhotos : undefined}
+      />
       <ChapterRevealScreen
         visible={chapterRevealOpen}
         reelExportInput={{

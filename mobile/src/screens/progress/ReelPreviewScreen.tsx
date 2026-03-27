@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -25,10 +26,22 @@ type ReelPreviewScreenProps = {
   daySpan: number;
   goalText?: string | null;
   onClose: () => void;
+  // Timelapse props
+  mode?: "video" | "timelapse";
+  timelapsePhotos?: Array<{ uri: string; label: string }>;
 };
 
 const ACCENT_ORANGE = "#E8450A";
 const VIDEO_BORDER_RADIUS = 20;
+
+type SpeedPreset = "slow" | "medium" | "fast" | "rapid";
+const SPEED_MAP: Record<SpeedPreset, number> = {
+  slow: 1000,
+  medium: 500,
+  fast: 250,
+  rapid: 100,
+};
+const SPEED_PRESETS: SpeedPreset[] = ["slow", "medium", "fast", "rapid"];
 
 export default function ReelPreviewScreen({
   visible,
@@ -37,6 +50,8 @@ export default function ReelPreviewScreen({
   daySpan,
   goalText,
   onClose,
+  mode,
+  timelapsePhotos,
 }: ReelPreviewScreenProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -50,6 +65,12 @@ export default function ReelPreviewScreen({
   const contentAnim = useRef(new Animated.Value(0)).current;
   const intentionAnim = useRef(new Animated.Value(1)).current;
   const switchAnim = useRef(new Animated.Value(0)).current; // 0 = day 1, 1 = now
+
+  const effectiveMode = mode ?? "video";
+  const [speedPreset, setSpeedPreset] = useState<SpeedPreset>("medium");
+  const [timelapseIndex, setTimelapseIndex] = useState(0);
+  const [timelapseReady, setTimelapseReady] = useState(false);
+  const [firstLoopDone, setFirstLoopDone] = useState(false);
 
   // Video frame sizing
   const videoPadding = 20;
@@ -66,6 +87,10 @@ export default function ReelPreviewScreen({
       setShowingNow(false);
       setVideoReady(false);
       setShowIntention(!!goalText);
+      setTimelapseIndex(0);
+      setTimelapseReady(false);
+      setSpeedPreset("medium");
+      setFirstLoopDone(false);
       fadeAnim.setValue(0);
       contentAnim.setValue(0);
       intentionAnim.setValue(1);
@@ -92,6 +117,43 @@ export default function ReelPreviewScreen({
       useNativeDriver: true,
     }).start(() => setShowIntention(false));
   }
+
+  // Prefetch timelapse images
+  useEffect(() => {
+    if (!visible || effectiveMode !== "timelapse" || !timelapsePhotos?.length) return;
+
+    Promise.all(timelapsePhotos.map((p) => Image.prefetch(p.uri)))
+      .then(() => setTimelapseReady(true))
+      .catch(() => setTimelapseReady(true)); // proceed even if some fail
+
+    return () => setTimelapseReady(false);
+  }, [visible, effectiveMode, timelapsePhotos]);
+
+  // Cycle through timelapse photos
+  useEffect(() => {
+    if (!visible || effectiveMode !== "timelapse" || !timelapseReady || !timelapsePhotos?.length)
+      return;
+
+    const intervalMs = SPEED_MAP[speedPreset];
+    const interval = setInterval(() => {
+      setTimelapseIndex((prev) => {
+        const next = (prev + 1) % timelapsePhotos.length;
+        if (next === 0 && !firstLoopDone) setFirstLoopDone(true);
+        return next;
+      });
+    }, intervalMs);
+
+    return () => clearInterval(interval);
+  }, [visible, effectiveMode, timelapseReady, speedPreset, timelapsePhotos, firstLoopDone]);
+
+  // Kick off reveal when timelapse is ready
+  useEffect(() => {
+    if (timelapseReady && effectiveMode === "timelapse") {
+      setVideoReady(true);
+      playRevealSound();
+      setTimeout(() => setFirstLoopDone(true), 800);
+    }
+  }, [timelapseReady, effectiveMode]);
 
   // Show content after video loads
   useEffect(() => {
@@ -158,21 +220,55 @@ export default function ReelPreviewScreen({
       ) : null}
 
       {/* Main content */}
-      <View style={[styles.content, { paddingTop: insets.top + 48, paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
+      <View
+        style={[
+          styles.content,
+          {
+            paddingTop: insets.top + 48,
+            paddingBottom: Math.max(insets.bottom + 12, 28),
+          },
+        ]}
+      >
         {/* Day label above video */}
-        <Animated.View style={[styles.dayLabelRow, { opacity: contentAnim }]}>
-          <Text style={[styles.dayLabel, !showingNow && styles.dayLabelActive]}>day 1</Text>
-          <Text style={styles.dayLabelDivider}>→</Text>
-          <Text style={[styles.dayLabel, showingNow && styles.dayLabelActive]}>day {daySpan}</Text>
-        </Animated.View>
+        {effectiveMode === "timelapse" ? (
+          <Animated.View style={[styles.dayLabelRow, { opacity: contentAnim }]}>
+            <Text style={[styles.dayLabel, styles.dayLabelActive]}>
+              {timelapsePhotos?.[timelapseIndex]?.label ?? ""}
+            </Text>
+            <Text style={styles.dayLabelDivider}>·</Text>
+            <Text style={styles.dayLabel}>{timelapsePhotos?.length ?? 0} photos</Text>
+          </Animated.View>
+        ) : (
+          <Animated.View style={[styles.dayLabelRow, { opacity: contentAnim }]}>
+            <Text style={[styles.dayLabel, !showingNow && styles.dayLabelActive]}>day 1</Text>
+            <Text style={styles.dayLabelDivider}>→</Text>
+            <Text style={[styles.dayLabel, showingNow && styles.dayLabelActive]}>
+              day {daySpan}
+            </Text>
+          </Animated.View>
+        )}
 
         {/* Video frame — tap to toggle */}
         <TactilePressable
           style={[styles.videoFrame, { width: finalFrameWidth, height: finalFrameHeight }]}
           pressScale={0.98}
-          onPress={toggleClip}
+          onPress={effectiveMode === "video" ? toggleClip : undefined}
         >
-          {currentUri ? (
+          {effectiveMode === "timelapse" && timelapsePhotos?.length ? (
+            <>
+              <Image
+                source={{ uri: timelapsePhotos[timelapseIndex]?.uri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+              />
+              {/* Day label overlay */}
+              <View style={styles.timelapseLabelWrap}>
+                <Text style={styles.timelapseLabel}>
+                  {timelapsePhotos[timelapseIndex]?.label}
+                </Text>
+              </View>
+            </>
+          ) : currentUri ? (
             <Video
               key={currentUri}
               source={{ uri: currentUri }}
@@ -194,17 +290,48 @@ export default function ReelPreviewScreen({
               { opacity: contentAnim, transform: [{ translateY: contentTranslateY }] },
             ]}
           >
-            {/* Toggle pill */}
-            <TactilePressable style={styles.togglePill} pressScale={0.95} onPress={toggleClip}>
-              <View style={[styles.toggleOption, !showingNow && styles.toggleOptionActive]}>
-                <Text style={[styles.toggleText, !showingNow && styles.toggleTextActive]}>day 1</Text>
+            {effectiveMode === "timelapse" ? (
+              <View style={styles.speedControlRow}>
+                {SPEED_PRESETS.map((preset) => (
+                  <TactilePressable
+                    key={preset}
+                    style={[styles.speedPill, speedPreset === preset && styles.speedPillActive]}
+                    pressScale={0.95}
+                    onPress={() => {
+                      triggerSelectionHaptic();
+                      setSpeedPreset(preset);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.speedPillText,
+                        speedPreset === preset && styles.speedPillTextActive,
+                      ]}
+                    >
+                      {preset}
+                    </Text>
+                  </TactilePressable>
+                ))}
               </View>
-              <View style={[styles.toggleOption, showingNow && styles.toggleOptionActive]}>
-                <Text style={[styles.toggleText, showingNow && styles.toggleTextActive]}>now</Text>
-              </View>
-            </TactilePressable>
+            ) : (
+              <>
+                {/* Toggle pill */}
+                <TactilePressable style={styles.togglePill} pressScale={0.95} onPress={toggleClip}>
+                  <View style={[styles.toggleOption, !showingNow && styles.toggleOptionActive]}>
+                    <Text style={[styles.toggleText, !showingNow && styles.toggleTextActive]}>
+                      day 1
+                    </Text>
+                  </View>
+                  <View style={[styles.toggleOption, showingNow && styles.toggleOptionActive]}>
+                    <Text style={[styles.toggleText, showingNow && styles.toggleTextActive]}>
+                      now
+                    </Text>
+                  </View>
+                </TactilePressable>
 
-            <Text style={styles.tapHint}>tap video to switch</Text>
+                <Text style={styles.tapHint}>tap video to switch</Text>
+              </>
+            )}
 
             {/* Unlock prompt for free users */}
             {!purchaseUnlocked ? (
@@ -366,5 +493,39 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 24,
     textAlign: "center",
+  },
+  speedControlRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  speedPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  speedPillActive: {
+    backgroundColor: ACCENT_ORANGE,
+  },
+  speedPillText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "rgba(0,0,0,0.3)",
+  },
+  speedPillTextActive: {
+    color: "#ffffff",
+  },
+  timelapseLabelWrap: {
+    position: "absolute",
+    bottom: 16,
+    left: 16,
+  },
+  timelapseLabel: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
 });
