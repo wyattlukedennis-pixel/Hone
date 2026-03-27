@@ -195,7 +195,7 @@ export default function ReelPreviewScreen({
   if (!visible) return null;
 
   return (
-    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+    <Animated.View style={[styles.root, { opacity: fadeAnim, width, height }]}>
       {/* Close button */}
       <Pressable
         style={[styles.closeButton, { top: insets.top + 8 }]}
@@ -364,9 +364,12 @@ export default function ReelPreviewScreen({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
     backgroundColor: "#f4efe6",
     zIndex: 9999,
+    elevation: 9999,
   },
   content: {
     flex: 1,
