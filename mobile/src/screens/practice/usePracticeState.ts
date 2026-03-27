@@ -273,12 +273,14 @@ export function usePracticeState({
       const allJourneys = response.journeys;
       if (allJourneys.length === 0) {
         onActiveJourneyChange(null);
-      } else {
-        const activeStillExists = Boolean(activeJourneyId) && allJourneys.some((journey) => journey.id === activeJourneyId);
+      } else if (activeJourneyId) {
+        // Only override if we have a stored active journey that no longer exists
+        const activeStillExists = allJourneys.some((journey) => journey.id === activeJourneyId);
         if (!activeStillExists) {
           onActiveJourneyChange(allJourneys[0].id);
         }
       }
+      // If activeJourneyId is null, don't auto-select — bootstrap will restore it from storage
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
     } finally {
