@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import { NativeModules } from "react-native";
 
-const PRODUCTION_API_URL = "https://api.hone.app";
+const PRODUCTION_API_URL = "https://hone-production-ebdd.up.railway.app";
 const FALLBACK_API_BASE_URL = __DEV__
   ? "http://localhost:4000"
   : PRODUCTION_API_URL;
