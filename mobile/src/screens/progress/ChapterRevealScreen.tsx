@@ -261,6 +261,19 @@ export default function ChapterRevealScreen({
     }
   }, [visible]);
 
+  // When user taps share while still composing, wait for it then auto-share
+  const shareWhenReady = useRef(false);
+
+  useEffect(() => {
+    if (composedUri && shareWhenReady.current) {
+      shareWhenReady.current = false;
+      void Sharing.shareAsync(composedUri, {
+        mimeType: "video/mp4",
+        dialogTitle: "share your progress",
+      });
+    }
+  }, [composedUri]);
+
   async function handleShare() {
     triggerSelectionHaptic();
     if (!purchaseUnlocked) {
@@ -281,10 +294,13 @@ export default function ChapterRevealScreen({
       return;
     }
 
-    // Still composing — button already shows "composing..."
-    if (composing) return;
+    // Still composing — mark to auto-share when done
+    if (composing) {
+      shareWhenReady.current = true;
+      return;
+    }
 
-    // Edge case: compose never started or failed — try again
+    // Edge case: compose never started or failed — try now
     if (!reelClips.length) return;
     const allClips = reelExportInput.sourceClips ?? [];
     const trailerClips = (reelExportInput.trailerMoments ?? []).map((m) => m.clip);
@@ -388,12 +404,12 @@ export default function ChapterRevealScreen({
 
             {purchaseUnlocked ? (
               <TactilePressable
-                style={[styles.shareButton, composing && styles.shareButtonComposing]}
+                style={styles.shareButton}
                 stretch
-                pressScale={composing ? 1 : 0.96}
-                onPress={composing ? undefined : () => { void handleShare(); }}
+                pressScale={0.96}
+                onPress={() => { void handleShare(); }}
               >
-                <Text style={styles.shareButtonText}>{composing ? "composing..." : "share to tiktok"}</Text>
+                <Text style={styles.shareButtonText}>share to tiktok</Text>
               </TactilePressable>
             ) : (
               <TactilePressable
