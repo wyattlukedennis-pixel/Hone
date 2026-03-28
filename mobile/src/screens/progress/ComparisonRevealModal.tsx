@@ -439,13 +439,10 @@ export function ComparisonRevealModal({
       useNativeDriver: true
     }).start();
 
-    // Auto-open reel preview when entryStage is "reel"
+    // Auto-reveal reel stage after loading spinner when entryStage is "reel"
     if (entryStage === "reel") {
-      // Show morph animation briefly, then open the toggle view
       setComposing(true);
       setTimeout(() => {
-        setComposedDaySpan(progressDays);
-        setReelPreviewVisible(true);
         setComposing(false);
       }, 2200);
     }
@@ -1003,7 +1000,7 @@ export function ComparisonRevealModal({
   return (
     <>
     <Modal visible={visible} animationType="none" transparent onRequestClose={handleCloseRequest}>
-      {entryStage === "reel" ? (
+      {entryStage === "reel" && composing ? (
         <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: "#f4efe6", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <LogoMorphLoader size={100} color="#E8450A" duration={900} />
         </View>
