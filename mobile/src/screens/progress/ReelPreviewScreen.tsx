@@ -107,15 +107,10 @@ export default function ReelPreviewScreen({
       setFirstLoopDone(false);
       setSaveState("idle");
       setExporting(false);
-      fadeAnim.setValue(0);
+      fadeAnim.setValue(1);
       contentAnim.setValue(0);
       intentionAnim.setValue(1);
       switchAnim.setValue(0);
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 320,
-        useNativeDriver: true,
-      }).start();
     }
   }, [visible, fadeAnim, contentAnim, goalText, intentionAnim, switchAnim]);
 

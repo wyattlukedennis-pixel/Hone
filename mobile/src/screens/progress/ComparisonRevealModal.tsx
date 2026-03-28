@@ -1003,7 +1003,7 @@ export function ComparisonRevealModal({
   return (
     <>
     <Modal visible={visible} animationType="none" transparent onRequestClose={handleCloseRequest}>
-      {entryStage === "reel" && !reelPreviewVisible ? (
+      {entryStage === "reel" ? (
         <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: "#f4efe6", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <LogoMorphLoader size={100} color="#E8450A" duration={900} />
         </View>
