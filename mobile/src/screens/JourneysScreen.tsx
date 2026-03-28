@@ -129,16 +129,10 @@ export function JourneysScreen({
     statusMessage,
     newTitle,
     setNewTitle,
-    newCategory,
-    setNewCategory,
-    newGoalText,
-    setNewGoalText,
     newMilestoneLengthDays,
     setNewMilestoneLengthDays,
     newCaptureMode,
     setNewCaptureMode,
-    newSkillPack,
-    setNewSkillPack,
     clipsByJourney,
     recorderJourneyId,
     setRecorderJourneyId,
@@ -619,9 +613,9 @@ export function JourneysScreen({
                         styles.skillName,
                         compactMode ? styles.skillNameCompact : undefined,
                         tightMode ? styles.skillNameTight : undefined,
-                        { fontSize: skillNameSize, lineHeight: Math.round(skillNameSize * 1.13) }
+                        { fontSize: skillNameSize, lineHeight: Math.round(skillNameSize * 1.15) }
                       ]}
-                      numberOfLines={1}
+                      numberOfLines={2}
                     >
                       {activeJourney.title.toLowerCase()}
                     </Text>
@@ -899,17 +893,11 @@ export function JourneysScreen({
         refreshing={refreshing}
         updatingId={updatingId}
         newTitle={newTitle}
-        newCategory={newCategory}
-        newGoalText={newGoalText}
         newMilestoneLengthDays={newMilestoneLengthDays}
         newCaptureMode={newCaptureMode}
-        newSkillPack={newSkillPack}
         onTitleChange={setNewTitle}
-        onCategoryChange={setNewCategory}
-        onGoalTextChange={setNewGoalText}
         onMilestoneLengthChange={setNewMilestoneLengthDays}
         onCaptureModeChange={setNewCaptureMode}
-        onSkillPackChange={setNewSkillPack}
         onClose={() => setManageOpen(false)}
         onCreateJourney={() => {
           void handleCreateJourney();
@@ -1141,12 +1129,13 @@ const styles = StyleSheet.create({
   },
   skillHeaderTop: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 10
   },
   skillName: {
     flex: 1,
+    flexShrink: 1,
     color: "#101010",
     fontSize: 48,
     lineHeight: 52,

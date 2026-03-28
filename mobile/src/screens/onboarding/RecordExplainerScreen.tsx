@@ -10,11 +10,10 @@ import { triggerSelectionHaptic } from "../../utils/feedback";
 type CaptureType = "video" | "photo";
 
 interface Props {
-  skillLabel: string;
   onContinue: (captureType: CaptureType) => void;
 }
 
-export function RecordExplainerScreen({ skillLabel, onContinue }: Props) {
+export function RecordExplainerScreen({ onContinue }: Props) {
   const [captureType, setCaptureType] = useState<CaptureType>("video");
 
   function handleContinue() {
@@ -25,35 +24,13 @@ export function RecordExplainerScreen({ skillLabel, onContinue }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.header}>record your{"\n"}day 1</Text>
+        <Text style={styles.header}>{"how do you want\nto capture?"}</Text>
         <Text style={styles.body}>
           {captureType === "video"
-            ? `capture a quick clip of where you're at right now with ${skillLabel}. it doesn't need to be good — the worse it is, the better your reveal will be.`
-            : `snap a photo of where you're at right now with ${skillLabel}. it doesn't need to be good — the worse it looks, the better your reveal will be.`}
+            ? "record short clips of your practice — playing an instrument, working out, drawing, cooking, anything. over time, hone stitches them into a reveal video that shows how far you've come."
+            : "snap daily photos of your progress — your physique, a drawing, a project build, anything visual. hone turns them into a timelapse that shows your transformation."}
         </Text>
 
-        <View style={styles.tips}>
-          <View style={styles.tipRow}>
-            <Text style={styles.tipIcon}>📱</Text>
-            <Text style={styles.tipText}>
-              {captureType === "video" ? "prop your phone up or hold it steady" : "find good lighting and a clean angle"}
-            </Text>
-          </View>
-          <View style={styles.tipRow}>
-            <Text style={styles.tipIcon}>{captureType === "video" ? "⏱" : "📐"}</Text>
-            <Text style={styles.tipText}>
-              {captureType === "video" ? "just 5-10 seconds is perfect" : "frame it the same way each time"}
-            </Text>
-          </View>
-          <View style={styles.tipRow}>
-            <Text style={styles.tipIcon}>🔄</Text>
-            <Text style={styles.tipText}>
-              {captureType === "video" ? "try to record from the same angle each day" : "take one photo a day — consistency is everything"}
-            </Text>
-          </View>
-        </View>
-
-        <Text style={styles.modeLabel}>how do you want to capture?</Text>
         <View style={styles.modeRow}>
           <TactilePressable
             style={[styles.modeCard, captureType === "video" && styles.modeCardSelected]}
@@ -70,6 +47,28 @@ export function RecordExplainerScreen({ skillLabel, onContinue }: Props) {
             <Text style={[styles.modeText, captureType === "photo" && styles.modeTextSelected]}>photo</Text>
           </TactilePressable>
         </View>
+
+        <View style={styles.examples}>
+          <Text style={styles.examplesLabel}>people use hone for</Text>
+          <View style={styles.exampleRow}>
+            <Text style={styles.exampleText}>🎹 learning an instrument</Text>
+          </View>
+          <View style={styles.exampleRow}>
+            <Text style={styles.exampleText}>💪 fitness transformations</Text>
+          </View>
+          <View style={styles.exampleRow}>
+            <Text style={styles.exampleText}>✏️ drawing & art practice</Text>
+          </View>
+          <View style={styles.exampleRow}>
+            <Text style={styles.exampleText}>🛹 skateboard tricks</Text>
+          </View>
+          <View style={styles.exampleRow}>
+            <Text style={styles.exampleText}>🍳 cooking skills</Text>
+          </View>
+          <View style={styles.exampleRow}>
+            <Text style={styles.exampleText}>💃 dance routines</Text>
+          </View>
+        </View>
       </ScrollView>
 
       <View style={styles.bottom}>
@@ -80,7 +79,7 @@ export function RecordExplainerScreen({ skillLabel, onContinue }: Props) {
             end={{ x: 1, y: 1 }}
             style={styles.ctaButton}
           >
-            <Text style={styles.ctaText}>open camera</Text>
+            <Text style={styles.ctaText}>continue</Text>
           </LinearGradient>
         </TactilePressable>
       </View>
@@ -99,46 +98,23 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   header: {
-    fontSize: 36,
+    fontSize: 32,
     fontFamily: theme.typography.display,
     color: theme.colors.textPrimary,
     marginBottom: 16,
-    lineHeight: 42,
+    lineHeight: 38,
   },
   body: {
     fontSize: 17,
     lineHeight: 25,
     color: theme.colors.textSecondary,
     fontFamily: theme.typography.body,
-    marginBottom: 36,
-  },
-  tips: {
-    gap: 20,
-    marginBottom: 40,
-  },
-  tipRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  tipIcon: {
-    fontSize: 28,
-  },
-  tipText: {
-    fontSize: 17,
-    color: theme.colors.textPrimary,
-    fontWeight: "500",
-    flex: 1,
-  },
-  modeLabel: {
-    fontSize: 16,
-    color: theme.colors.textSecondary,
-    fontWeight: "600",
-    marginBottom: 14,
+    marginBottom: 32,
   },
   modeRow: {
     flexDirection: "row",
     gap: 14,
+    marginBottom: 36,
   },
   modeCard: {
     width: (Dimensions.get("window").width - 48 - 14) / 2,
@@ -165,6 +141,25 @@ const styles = StyleSheet.create({
   },
   modeTextSelected: {
     color: theme.colors.accent,
+  },
+  examples: {
+    gap: 12,
+  },
+  examplesLabel: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+    marginBottom: 4,
+  },
+  exampleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  exampleText: {
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    fontWeight: "500",
   },
   bottom: {
     paddingBottom: 24,

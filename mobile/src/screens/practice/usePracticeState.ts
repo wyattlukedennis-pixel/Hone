@@ -110,11 +110,8 @@ export function usePracticeState({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
-  const [newCategory, setNewCategory] = useState("");
-  const [newGoalText, setNewGoalText] = useState("");
   const [newMilestoneLengthDays, setNewMilestoneLengthDays] = useState<number>(7);
   const [newCaptureMode, setNewCaptureMode] = useState<CaptureMode>("video");
-  const [newSkillPack, setNewSkillPack] = useState<Journey["skillPack"]>("fitness");
 
   const [clipsByJourney, setClipsByJourney] = useState<Record<string, Clip[]>>({});
   const [clipsLoadingByJourney, setClipsLoadingByJourney] = useState<Record<string, boolean>>({});
@@ -439,9 +436,7 @@ export function usePracticeState({
     try {
       const response = await createJourney(token, {
         title,
-        skillPack: newSkillPack,
-        category: newCategory.trim() || null,
-        goalText: newGoalText.trim() || null,
+        skillPack: "fitness",
         captureMode: newCaptureMode,
         milestoneLengthDays: milestoneLengthOptions.includes(newMilestoneLengthDays as (typeof milestoneLengthOptions)[number])
           ? newMilestoneLengthDays
@@ -455,11 +450,8 @@ export function usePracticeState({
       setRecorderJourneyId(createdJourney.id);
       trackEvent("record_tapped", { journeyId: createdJourney.id, context: "journey_create_instant_start" });
       setNewTitle("");
-      setNewCategory("");
-      setNewGoalText("");
       setNewMilestoneLengthDays(7);
       setNewCaptureMode("video");
-      setNewSkillPack("fitness");
       setStatusMessage("Journey live. Day 1 camera is open.");
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
@@ -681,16 +673,10 @@ export function usePracticeState({
     statusMessage,
     newTitle,
     setNewTitle,
-    newCategory,
-    setNewCategory,
-    newGoalText,
-    setNewGoalText,
     newMilestoneLengthDays,
     setNewMilestoneLengthDays,
     newCaptureMode,
     setNewCaptureMode,
-    newSkillPack,
-    setNewSkillPack,
     clipsByJourney,
     activeClip,
     setActiveClip,

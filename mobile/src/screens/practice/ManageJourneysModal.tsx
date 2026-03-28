@@ -8,7 +8,6 @@ import type { Journey } from "../../types/journey";
 import { triggerSelectionHaptic } from "../../utils/feedback";
 import { hasRevealExportPurchase } from "../../utils/purchases";
 import { getCurrentStreak, getDayCount } from "../../utils/progress";
-import { getSkillPackLabel, skillPackOptions } from "../../utils/skillPack";
 import { ActionButton } from "./ActionButton";
 import {
   PRACTICE_MODAL_BACKDROP,
@@ -28,17 +27,11 @@ type ManageJourneysModalProps = {
   refreshing: boolean;
   updatingId: string | null;
   newTitle: string;
-  newCategory: string;
-  newGoalText: string;
   newMilestoneLengthDays: number;
   newCaptureMode: "video" | "photo";
-  newSkillPack: "fitness" | "drawing" | "instrument";
   onTitleChange: (value: string) => void;
-  onCategoryChange: (value: string) => void;
-  onGoalTextChange: (value: string) => void;
   onMilestoneLengthChange: (value: number) => void;
   onCaptureModeChange: (value: "video" | "photo") => void;
-  onSkillPackChange: (value: "fitness" | "drawing" | "instrument") => void;
   onClose: () => void;
   onCreateJourney: () => void;
   onRefresh: () => void;
@@ -56,17 +49,11 @@ export function ManageJourneysModal({
   refreshing,
   updatingId,
   newTitle,
-  newCategory,
-  newGoalText,
   newMilestoneLengthDays,
   newCaptureMode,
-  newSkillPack,
   onTitleChange,
-  onCategoryChange,
-  onGoalTextChange,
   onMilestoneLengthChange,
   onCaptureModeChange,
-  onSkillPackChange,
   onClose,
   onCreateJourney,
   onRefresh,
@@ -149,51 +136,12 @@ export function ManageJourneysModal({
                   );
                 })}
               </View>
-              <Text style={styles.captureModeLabel}>skill pack</Text>
-              <View style={styles.captureModeRow}>
-                {skillPackOptions.map((option) => {
-                  const selected = newSkillPack === option.key;
-                  return (
-                    <Pressable
-                      key={option.key}
-                      style={({ pressed }) => [
-                        styles.captureModeChip,
-                        selected ? styles.captureModeChipSelected : undefined,
-                        pressed ? styles.pressed : undefined
-                      ]}
-                      onPress={() => {
-                        triggerSelectionHaptic();
-                        onSkillPackChange(option.key);
-                      }}
-                    >
-                      <Text style={[styles.captureModeChipText, selected ? styles.captureModeChipTextSelected : undefined]}>{option.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
               <TextInput
                 style={styles.input}
                 placeholder="title (e.g., learning piano)"
                 value={newTitle}
                 onChangeText={onTitleChange}
                 editable={!creating}
-                placeholderTextColor="rgba(0,0,0,0.25)"
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="category (optional)"
-                value={newCategory}
-                onChangeText={onCategoryChange}
-                editable={!creating}
-                placeholderTextColor="rgba(0,0,0,0.25)"
-              />
-              <TextInput
-                style={[styles.input, styles.goalInput]}
-                placeholder="goal (optional)"
-                value={newGoalText}
-                onChangeText={onGoalTextChange}
-                editable={!creating}
-                multiline
                 placeholderTextColor="rgba(0,0,0,0.25)"
               />
               <ActionButton
@@ -238,7 +186,7 @@ export function ManageJourneysModal({
                   <View style={styles.rowBody}>
                     <Text style={styles.rowTitle}>{journey.title.toLowerCase()}</Text>
                     <Text style={styles.rowMeta}>
-                      {getSkillPackLabel(journey.skillPack).toLowerCase()} • day {Math.max(dayCount, 1)} • {streak}-day streak
+                      day {Math.max(dayCount, 1)} • {streak}-day streak
                     </Text>
 
                     <View style={styles.rowActions}>
@@ -458,10 +406,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     color: theme.colors.textPrimary
-  },
-  goalInput: {
-    minHeight: 72,
-    textAlignVertical: "top"
   },
   listHeader: {
     marginTop: 6,
