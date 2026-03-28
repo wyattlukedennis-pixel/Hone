@@ -295,6 +295,17 @@ export default function ReelPreviewScreen({
         <Text style={styles.closeButtonText}>✕</Text>
       </Pressable>
 
+      {/* DEBUG: show URI state */}
+      <View style={{ position: "absolute", top: insets.top + 44, left: 16, right: 16, zIndex: 99, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 8, padding: 8 }}>
+        <Text style={{ color: "#fff", fontSize: 10, fontFamily: "Courier" }}>
+          firstClip: {firstClipUri ? firstClipUri.slice(0, 60) + "..." : "NULL"}{"\n"}
+          latestClip: {latestClipUri ? latestClipUri.slice(0, 60) + "..." : "NULL"}{"\n"}
+          currentUri: {currentUri ? "truthy" : "NULL/empty"}{"\n"}
+          videoReady: {String(videoReady)} | videoError: {String(videoError)}{"\n"}
+          mode: {effectiveMode}
+        </Text>
+      </View>
+
       {/* Intention overlay */}
       {showIntention && goalText ? (
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissIntention}>
