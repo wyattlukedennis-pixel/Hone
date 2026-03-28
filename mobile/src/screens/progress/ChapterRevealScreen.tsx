@@ -261,18 +261,18 @@ export default function ChapterRevealScreen({
     }
   }, [visible]);
 
-  // When user taps share while still composing, wait for it then auto-share
-  const shareWhenReady = useRef(false);
+  // When user taps share while still composing, show "composing..." and auto-share when done
+  const [waitingForShare, setWaitingForShare] = useState(false);
 
   useEffect(() => {
-    if (composedUri && shareWhenReady.current) {
-      shareWhenReady.current = false;
+    if (composedUri && waitingForShare) {
+      setWaitingForShare(false);
       void Sharing.shareAsync(composedUri, {
         mimeType: "video/mp4",
         dialogTitle: "share your progress",
       });
     }
-  }, [composedUri]);
+  }, [composedUri, waitingForShare]);
 
   async function handleShare() {
     triggerSelectionHaptic();
@@ -294,9 +294,9 @@ export default function ChapterRevealScreen({
       return;
     }
 
-    // Still composing — mark to auto-share when done
+    // Still composing — show feedback and auto-share when done
     if (composing) {
-      shareWhenReady.current = true;
+      setWaitingForShare(true);
       return;
     }
 
@@ -404,12 +404,12 @@ export default function ChapterRevealScreen({
 
             {purchaseUnlocked ? (
               <TactilePressable
-                style={styles.shareButton}
+                style={[styles.shareButton, waitingForShare && styles.shareButtonComposing]}
                 stretch
-                pressScale={0.96}
+                pressScale={waitingForShare ? 1 : 0.96}
                 onPress={() => { void handleShare(); }}
               >
-                <Text style={styles.shareButtonText}>share to tiktok</Text>
+                <Text style={styles.shareButtonText}>{waitingForShare ? "composing..." : "share to tiktok"}</Text>
               </TactilePressable>
             ) : (
               <TactilePressable
