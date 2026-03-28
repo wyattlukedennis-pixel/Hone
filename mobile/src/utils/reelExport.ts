@@ -212,14 +212,21 @@ async function uploadLocalClipsForRender(input: ExportReelInput): Promise<void> 
 }
 
 async function resolveRenderedReelAsset(input: ExportReelInput): Promise<ResolvedReelAsset | null> {
-  if (!input.token || !input.journeyId) return null;
+  if (!input.token || !input.journeyId) {
+    if (__DEV__) console.warn("[reelExport] resolveRendered: missing token or journeyId");
+    return null;
+  }
   const clipIds = buildRenderClipIds(input);
-  if (!clipIds.length) return null;
+  if (!clipIds.length) {
+    if (__DEV__) console.warn("[reelExport] resolveRendered: no clipIds to send");
+    return null;
+  }
 
   try {
     // Upload local clips to server so the renderer can access them
     await uploadLocalClipsForRender(input);
 
+    if (__DEV__) console.log("[reelExport] resolveRendered: requesting render with", clipIds.length, "clipIds");
     const response = await requestJson<RenderedRevealResponse>(`/journeys/${input.journeyId}/reveal/render`, {
       token: input.token,
       method: "POST",
@@ -235,7 +242,11 @@ async function resolveRenderedReelAsset(input: ExportReelInput): Promise<Resolve
       }
     });
 
-    if (!response.renderUrl) return null;
+    if (!response.renderUrl) {
+      if (__DEV__) console.warn("[reelExport] resolveRendered: server returned no renderUrl");
+      return null;
+    }
+    if (__DEV__) console.log("[reelExport] resolveRendered: got renderUrl, downloading...");
     const extension = inferExtension(response.renderUrl, "video");
     const mimeType = inferMimeType(extension, "video");
     const remoteName = response.renderUrl.split("/").at(-1) ?? `chapter-${input.chapterNumber}`;
@@ -254,7 +265,8 @@ async function resolveRenderedReelAsset(input: ExportReelInput): Promise<Resolve
       sourceKind: "rendered",
       cacheHit: response.cacheHit ? exportFile.cacheHit : false
     };
-  } catch {
+  } catch (error) {
+    if (__DEV__) console.error("[reelExport] resolveRendered FAILED:", error);
     return null;
   }
 }
@@ -311,10 +323,16 @@ async function resolveReelAsset(input: ExportReelInput): Promise<ResolvedReelAss
     return renderedAsset;
   }
 
+  if (__DEV__) console.log("[reelExport] resolveReelAsset: server render failed, trying fallback clip");
   const primaryClipResult = resolvePrimaryClip(input);
   const primaryClip = primaryClipResult.clip;
-  if (!primaryClip) return null;
+  if (!primaryClip) {
+    if (__DEV__) console.warn("[reelExport] resolveReelAsset: no primary clip available",
+      { trailerMoments: (input.trailerMoments ?? []).length, fallbackClip: !!input.fallbackClip, sourceClips: (input.sourceClips ?? []).length });
+    return null;
+  }
 
+  if (__DEV__) console.log("[reelExport] resolveReelAsset: fallback clip found, videoUrl:", primaryClip.videoUrl?.slice(0, 60));
   const extension = inferExtension(primaryClip.videoUrl, primaryClip.captureType);
   const mimeType = inferMimeType(extension, primaryClip.captureType);
   const clipVersion = sanitizeFileSegment(primaryClip.updatedAt ?? "v1");
@@ -525,9 +543,14 @@ export async function exportAndSaveReel(input: ExportReelInput): Promise<ExportR
 
 export async function resolveReelUri(input: ExportReelInput): Promise<string | null> {
   try {
+    if (__DEV__) console.log("[reelExport] resolveReelUri called",
+      { token: !!input.token, journeyId: input.journeyId, sourceClips: (input.sourceClips ?? []).length,
+        trailerMoments: (input.trailerMoments ?? []).length, fallbackClip: !!input.fallbackClip });
     const asset = await resolveReelAsset(input);
+    if (__DEV__) console.log("[reelExport] resolveReelUri result:", asset ? asset.uri?.slice(0, 80) : "NULL");
     return asset?.uri ?? null;
-  } catch {
+  } catch (error) {
+    if (__DEV__) console.error("[reelExport] resolveReelUri FAILED:", error);
     return null;
   }
 }

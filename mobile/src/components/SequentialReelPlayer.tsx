@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import type { StyleProp, ViewStyle } from "react-native";
 
-type ReelClipEntry = {
+export type ReelClipEntry = {
   uri: string;
   label: string;
-  /** How long to show this clip in ms. First/last = 3000, middle = 800. */
   holdMs: number;
+  captureType: "video" | "photo";
 };
 
 type SequentialReelPlayerProps = {
@@ -18,11 +18,13 @@ type SequentialReelPlayerProps = {
   autoPlay?: boolean;
 };
 
-const FLASH_DURATION_MS = 80;
-
 /**
- * Plays a sequence of video clips back-to-back with white flash transitions,
- * simulating a stitched montage without FFmpeg.
+ * Plays a sequence of video/photo clips back-to-back with hard cuts.
+ *
+ * All clips are mounted simultaneously to eliminate decode delay between
+ * transitions — only the current clip is visible and playing.
+ *
+ * Hard cuts only — no fades, no flashes. Native to TikTok pacing.
  */
 export function SequentialReelPlayer({
   clips,
@@ -33,11 +35,9 @@ export function SequentialReelPlayer({
 }: SequentialReelPlayerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playing, setPlaying] = useState(autoPlay);
-  const [showFlash, setShowFlash] = useState(false);
   const [ready, setReady] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const clipTimerStarted = useRef(false);
 
   const clip = clips[currentIndex];
 
@@ -48,38 +48,12 @@ export function SequentialReelPlayer({
         setPlaying(false);
         return;
       }
-      // Flash then loop
-      setShowFlash(true);
-      flashTimerRef.current = setTimeout(() => {
-        setShowFlash(false);
-        setCurrentIndex(0);
-        labelOpacity.setValue(0);
-        Animated.timing(labelOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }).start();
-      }, FLASH_DURATION_MS);
-      return;
-    }
-
-    // Flash transition
-    setShowFlash(true);
-    flashTimerRef.current = setTimeout(() => {
-      setShowFlash(false);
+      setCurrentIndex(0);
+    } else {
       setCurrentIndex(nextIndex);
-      labelOpacity.setValue(0);
-      Animated.timing(labelOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }, FLASH_DURATION_MS);
-  }, [currentIndex, clips.length, loop, labelOpacity]);
+    }
+  }, [currentIndex, clips.length, loop]);
 
-  const clipTimerStarted = useRef(false);
-
-  // When a clip becomes ready, start the hold timer (once per clip)
   const onClipReady = useCallback(() => {
     if (!ready) setReady(true);
     if (!playing || !clip || clipTimerStarted.current) return;
@@ -87,16 +61,10 @@ export function SequentialReelPlayer({
     holdTimerRef.current = setTimeout(advanceClip, clip.holdMs);
   }, [playing, clip, advanceClip, ready]);
 
-  function handlePlaybackStatus(status: AVPlaybackStatus) {
-    if (!status.isLoaded) return;
-    onClipReady();
-  }
-
-  // Cleanup timers
+  // Cleanup
   useEffect(() => {
     return () => {
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     };
   }, []);
 
@@ -109,33 +77,65 @@ export function SequentialReelPlayer({
     }
   }, [currentIndex]);
 
-  if (!clip) return null;
+  if (!clips.length) return null;
 
   return (
     <View style={[styles.container, style]}>
-      <Video
-        key={`reel-${currentIndex}-${clip.uri}`}
-        source={{ uri: clip.uri }}
-        style={StyleSheet.absoluteFill}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay={playing}
-        isMuted={muted}
-        isLooping={false}
-        onPlaybackStatusUpdate={handlePlaybackStatus}
-      />
+      {/* Mount ALL clips — only current is visible and playing */}
+      {clips.map((entry, index) => {
+        const isCurrent = index === currentIndex;
+        return (
+          <View
+            key={`slot-${index}-${entry.uri}`}
+            style={[StyleSheet.absoluteFill, { zIndex: isCurrent ? 1 : 0, opacity: isCurrent ? 1 : 0 }]}
+            pointerEvents={isCurrent ? "auto" : "none"}
+          >
+            {entry.captureType === "photo" ? (
+              <Image
+                source={{ uri: entry.uri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+                onLoad={isCurrent ? onClipReady : undefined}
+              />
+            ) : (
+              <Video
+                source={{ uri: entry.uri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={isCurrent && playing}
+                isMuted={muted}
+                isLooping={false}
+                onPlaybackStatusUpdate={isCurrent ? (status: AVPlaybackStatus) => {
+                  if (!status.isLoaded) {
+                    if ("error" in status && status.error) {
+                      if (__DEV__) console.error("[SequentialReelPlayer] load error:", status.error);
+                      onClipReady();
+                    }
+                    return;
+                  }
+                  onClipReady();
+                } : undefined}
+                onError={isCurrent ? (error: string) => {
+                  if (__DEV__) console.error("[SequentialReelPlayer] onError:", error);
+                  onClipReady();
+                } : undefined}
+              />
+            )}
+          </View>
+        );
+      })}
 
       {/* Day label overlay */}
-      <Animated.View style={[styles.labelWrap, { opacity: labelOpacity }]}>
-        <Text style={styles.labelShadow}>{clip.label}</Text>
-        <Text style={styles.labelText}>{clip.label}</Text>
-      </Animated.View>
-
-      {/* White flash transition */}
-      {showFlash ? <View style={styles.flash} /> : null}
+      {clip ? (
+        <View style={[styles.labelWrap, { zIndex: 6 }]}>
+          <Text style={styles.labelShadow}>{clip.label}</Text>
+          <Text style={styles.labelText}>{clip.label}</Text>
+        </View>
+      ) : null}
 
       {/* Loading state */}
       {!ready ? (
-        <View style={styles.loadingOverlay}>
+        <View style={[styles.loadingOverlay, { zIndex: 7 }]}>
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       ) : null}
@@ -169,10 +169,6 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
-  },
-  flash: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#ffffff",
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

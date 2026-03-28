@@ -295,12 +295,14 @@ export function ComparisonRevealModal({
         uri: clip.videoUrl,
         label: `day ${index + 1}`,
         holdMs: index === 0 ? 3000 : index === sorted.length - 1 ? 3000 : 800,
+        captureType: clip.captureType,
       }));
     }
     return reelCards.map((entry, index) => ({
       uri: entry.clip.videoUrl,
       label: entry.title.toLowerCase(),
       holdMs: index === 0 ? 3000 : index === reelCards.length - 1 ? 3000 : 800,
+      captureType: entry.clip.captureType,
     }));
   }, [allChapterClips, reelCards]);
   const reelMomentsLabel = `${reelCards.length} ${reelCards.length === 1 ? "moment" : "moments"}`;

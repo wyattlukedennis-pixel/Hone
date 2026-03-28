@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
   Animated,
   Modal,
   Platform,
@@ -11,17 +9,19 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
-import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LogoMorphLoader } from "../../components/LogoMorphLoader";
 import { PaywallModal } from "../../components/PaywallModal";
+import { SequentialReelPlayer } from "../../components/SequentialReelPlayer";
 import { TactilePressable } from "../../components/TactilePressable";
-import { triggerSelectionHaptic, triggerMilestoneHaptic, playRevealSound } from "../../utils/feedback";
+import { triggerSelectionHaptic, playRevealSound } from "../../utils/feedback";
 import { hasRevealExportPurchase } from "../../utils/purchases";
-import { resolveReelUri, type ExportReelInput } from "../../utils/reelExport";
+import { composeReel } from "../../utils/reelComposer";
+import type { ExportReelInput } from "../../utils/reelExport";
+import type { Clip } from "../../types/clip";
+import type { ReelClipEntry } from "../../components/SequentialReelPlayer";
 
 type ChapterRevealScreenProps = {
   visible: boolean;
@@ -33,12 +33,88 @@ type ChapterRevealScreenProps = {
 };
 
 type Phase = "loading" | "intention" | "playing" | "error";
-type SaveState = "idle" | "saving" | "saved";
 
 const ACCENT = "#E8450A";
 const VIDEO_RADIUS = 20;
-const MIN_LOADING_MS = 2500;
-const RESOLVE_TIMEOUT_MS = 30000;
+const LOADING_MS = 2500;
+
+/**
+ * Build clip durations matching the reveal spec:
+ * - First clip: 2s
+ * - Middle clips: 1.5s each
+ * - Final clip: 5s (capped at actual clip duration)
+ */
+function computeClipHoldMs(clipCount: number, clips: Clip[]): number[] {
+  if (clipCount <= 1) {
+    const actual = clips[0]?.durationMs ?? 5000;
+    return [Math.min(10000, Math.max(5000, actual))];
+  }
+  if (clipCount === 2) {
+    const lastActual = clips[1]?.durationMs ?? 5000;
+    return [2000, Math.min(10000, Math.max(5000, lastActual))];
+  }
+
+  const durations: number[] = [2000]; // First clip: 2s
+  for (let i = 1; i < clipCount - 1; i++) {
+    const actual = clips[i]?.durationMs ?? 1500;
+    durations.push(Math.min(1500, actual)); // Middle: 1.5s
+  }
+  const lastActual = clips[clipCount - 1]?.durationMs ?? 5000;
+  durations.push(Math.min(10000, Math.max(5000, lastActual))); // Final: 5-10s
+  return durations;
+}
+
+/**
+ * Determine clip count based on journey days.
+ */
+function clipCountForDays(journeyDays: number): number {
+  if (journeyDays <= 14) return 5;
+  if (journeyDays <= 30) return 7;
+  if (journeyDays <= 60) return 9;
+  if (journeyDays <= 100) return 11;
+  return 13;
+}
+
+function selectSpread<T>(arr: T[], count: number): T[] {
+  if (arr.length <= count) return arr;
+  const last = arr.length - 1;
+  const indices: number[] = [0]; // always include first
+  const middleSlots = count - 2;
+  for (let i = 0; i < middleSlots; i++) {
+    indices.push(Math.round(((i + 1) / (middleSlots + 1)) * last));
+  }
+  indices.push(last); // always include last
+  return [...new Set(indices)].sort((a, b) => a - b).map((idx) => arr[idx]);
+}
+
+function buildReelClips(clips: Clip[]): ReelClipEntry[] {
+  const sorted = [...clips].sort(
+    (a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime()
+  );
+
+  // Calculate journey span
+  let journeyDays = 1;
+  if (sorted.length >= 2) {
+    const firstDate = new Date(sorted[0].recordedAt).getTime();
+    const lastDate = new Date(sorted[sorted.length - 1].recordedAt).getTime();
+    journeyDays = Math.max(1, Math.ceil((lastDate - firstDate) / (1000 * 60 * 60 * 24)) + 1);
+  }
+
+  const targetCount = clipCountForDays(journeyDays);
+  const selected = selectSpread(sorted, targetCount);
+  const holdDurations = computeClipHoldMs(selected.length, selected);
+  const days = [...new Set(sorted.map((c) => c.recordedOn))].sort();
+
+  return selected.map((clip, i) => {
+    const dayIdx = days.indexOf(clip.recordedOn);
+    return {
+      uri: clip.videoUrl,
+      label: `day ${(dayIdx >= 0 ? dayIdx : i) + 1}`,
+      holdMs: holdDurations[i] ?? 1500,
+      captureType: clip.captureType,
+    };
+  });
+}
 
 export default function ChapterRevealScreen({
   visible,
@@ -51,15 +127,13 @@ export default function ChapterRevealScreen({
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState<Phase>("loading");
-  const [videoUri, setVideoUri] = useState<string | null>(null);
-  const [videoReady, setVideoReady] = useState(false);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [purchaseBump, setPurchaseBump] = useState(0);
   const purchaseUnlocked = hasRevealExportPurchase() || purchaseBump > 0;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const contentAnim = useRef(new Animated.Value(0)).current;
   const intentionAnim = useRef(new Animated.Value(1)).current;
+  const revealSoundPlayed = useRef(false);
 
   // Video frame sizing — constrain so buttons fit below
   const framePadding = 20;
@@ -68,15 +142,26 @@ export default function ChapterRevealScreen({
   const frameHeight = Math.min(idealFrameHeight, maxFrameHeight);
   const frameWidth = (frameHeight * 9) / 16;
 
+  // Build reel clips from local sourceClips
+  const reelClips = useMemo(() => {
+    const allClips = reelExportInput.sourceClips ?? [];
+    const trailerClips = (reelExportInput.trailerMoments ?? []).map((m) => m.clip);
+    const fallback = reelExportInput.fallbackClip ? [reelExportInput.fallbackClip] : [];
+    // Prefer sourceClips (full timeline), fall back to trailer moments, then single clip
+    const clips = allClips.length > 0 ? allClips : trailerClips.length > 0 ? trailerClips : fallback;
+    if (!clips.length) return [];
+    const built = buildReelClips(clips);
+    if (__DEV__) console.log("[ChapterReveal] reelClips:", built.map((c) => ({ uri: c.uri?.slice(0, 80), type: c.captureType, label: c.label })));
+    return built;
+  }, [reelExportInput.sourceClips, reelExportInput.trailerMoments, reelExportInput.fallbackClip]);
+
   // Resolve the reel when visible
   useEffect(() => {
     if (!visible) return;
 
     // Reset state
     setPhase(goalText ? "intention" : "loading");
-    setVideoUri(null);
-    setVideoReady(false);
-    setSaveState("idle");
+    revealSoundPlayed.current = false;
     fadeAnim.setValue(0);
     contentAnim.setValue(0);
     intentionAnim.setValue(1);
@@ -86,6 +171,14 @@ export default function ChapterRevealScreen({
       duration: 300,
       useNativeDriver: true,
     }).start();
+
+    const loadingTimer = setTimeout(() => {
+      if (reelClips.length > 0) {
+        setPhase("playing");
+      } else {
+        setPhase("error");
+      }
+    }, goalText ? LOADING_MS + 3000 : LOADING_MS);
 
     // Show intention first if goalText exists
     if (goalText) {
@@ -97,45 +190,20 @@ export default function ChapterRevealScreen({
         }).start(() => setPhase("loading"));
       }, 3000);
 
-      // Start rendering in background during intention
-      void resolveVideo();
-
-      return () => clearTimeout(intentionTimer);
+      return () => {
+        clearTimeout(intentionTimer);
+        clearTimeout(loadingTimer);
+      };
     }
 
-    void resolveVideo();
+    return () => clearTimeout(loadingTimer);
   }, [visible]);
 
-  async function resolveVideo() {
-    const startTime = Date.now();
-    try {
-      const uriPromise = resolveReelUri(reelExportInput);
-      const timeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), RESOLVE_TIMEOUT_MS)
-      );
-      const uri = await Promise.race([uriPromise, timeoutPromise]);
-      // Ensure minimum loading time for the morph animation
-      const elapsed = Date.now() - startTime;
-      if (elapsed < MIN_LOADING_MS) {
-        await new Promise((r) => setTimeout(r, MIN_LOADING_MS - elapsed));
-      }
-      if (__DEV__) console.log("[ChapterReveal] resolveReelUri result:", uri);
-      if (uri) {
-        setVideoUri(uri);
-        setPhase("playing");
-      } else {
-        if (__DEV__) console.warn("[ChapterReveal] No URI returned — check backend");
-        setPhase("error");
-      }
-    } catch (error) {
-      if (__DEV__) console.error("[ChapterReveal] Resolve failed:", error);
-      setPhase("error");
-    }
-  }
-
-  // Animate content in when video is ready
+  // Animate content in and play sound when entering playing phase
   useEffect(() => {
-    if (videoReady) {
+    if (phase === "playing" && !revealSoundPlayed.current) {
+      revealSoundPlayed.current = true;
+      playRevealSound();
       Animated.spring(contentAnim, {
         toValue: 1,
         tension: 50,
@@ -143,64 +211,53 @@ export default function ChapterRevealScreen({
         useNativeDriver: true,
       }).start();
     }
-  }, [videoReady, contentAnim]);
+  }, [phase, contentAnim]);
 
-  function handlePlaybackStatus(status: AVPlaybackStatus) {
-    if (!status.isLoaded) return;
-    if (!videoReady) {
-      setVideoReady(true);
-      playRevealSound();
-    }
-  }
-
-  async function handleSave() {
-    if (saveState !== "idle" || !videoUri) return;
-    triggerSelectionHaptic();
-
-    if (!purchaseUnlocked) {
-      setPaywallVisible(true);
-      return;
-    }
-
-    const { status } = await MediaLibrary.requestPermissionsAsync(true);
-    if (status !== "granted") {
-      Alert.alert("permission needed", "hone needs photo library access to save.", [{ text: "ok" }]);
-      return;
-    }
-
-    setSaveState("saving");
-    try {
-      await MediaLibrary.saveToLibraryAsync(videoUri);
-      setSaveState("saved");
-      triggerMilestoneHaptic();
-    } catch {
-      setSaveState("idle");
-      Alert.alert("save failed", "something went wrong. try again.");
-    }
-  }
+  const [composing, setComposing] = useState(false);
 
   async function handleShare() {
-    if (!videoUri) return;
     triggerSelectionHaptic();
-
     if (!purchaseUnlocked) {
       setPaywallVisible(true);
       return;
     }
+    if (!reelClips.length) return;
 
-    const available = await Sharing.isAvailableAsync();
-    if (!available) {
-      Alert.alert("sharing unavailable", "sharing isn't available on this device.");
+    // Get all source clips for server upload
+    const allClips = reelExportInput.sourceClips ?? [];
+    const trailerClips = (reelExportInput.trailerMoments ?? []).map((m) => m.clip);
+    const fallback = reelExportInput.fallbackClip ? [reelExportInput.fallbackClip] : [];
+    const sourceClips = allClips.length > 0 ? allClips : trailerClips.length > 0 ? trailerClips : fallback;
+
+    if (!sourceClips.length || !reelExportInput.token || !reelExportInput.journeyId) {
+      if (__DEV__) console.warn("[ChapterReveal] Missing data for composition");
       return;
     }
 
+    setComposing(true);
     try {
-      await Sharing.shareAsync(videoUri, {
-        mimeType: "video/mp4",
-        dialogTitle: "share your progress reel",
+      const composedUri = await composeReel({
+        token: reelExportInput.token,
+        journeyId: reelExportInput.journeyId,
+        clips: sourceClips,
+        chapterNumber,
+        milestoneLengthDays: reelExportInput.milestoneLengthDays,
+        progressDays: reelExportInput.progressDays,
+        currentStreak: reelExportInput.currentStreak,
       });
+
+      if (composedUri) {
+        await Sharing.shareAsync(composedUri, {
+          mimeType: "video/mp4",
+          dialogTitle: "share your progress",
+        });
+      } else {
+        if (__DEV__) console.warn("[ChapterReveal] Composition returned null");
+      }
     } catch (error) {
       if (__DEV__) console.error("[ChapterReveal] Share failed:", error);
+    } finally {
+      setComposing(false);
     }
   }
 
@@ -242,98 +299,59 @@ export default function ChapterRevealScreen({
       {phase === "error" ? (
         <View style={styles.loadingContainer}>
           <Text style={styles.errorText}>couldn't build your reveal</Text>
-          <Text style={styles.errorSubtext}>try recording a few more clips first</Text>
-          <TactilePressable
-            style={styles.retryButton}
-            pressScale={0.96}
-            onPress={() => {
-              setPhase("loading");
-              void resolveVideo();
-            }}
-          >
-            <Text style={styles.retryButtonText}>try again</Text>
-          </TactilePressable>
+          <Text style={styles.errorSubtext}>record a few more clips to unlock your reel</Text>
         </View>
       ) : null}
 
-      {/* Playing phase */}
-      {phase === "playing" ? (
+      {/* Playing phase — fully local via SequentialReelPlayer */}
+      {phase === "playing" && reelClips.length > 0 ? (
         <View style={[styles.content, { paddingTop: insets.top + 48, paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
           {/* Chapter label */}
           <Text style={styles.chapterLabel}>chapter {chapterNumber} reveal</Text>
 
           {/* Video frame */}
-          <View style={[styles.videoFrame, { width: frameWidth, height: frameHeight }]}>
-            {videoUri ? (
-              <Video
-                source={{ uri: videoUri }}
-                style={StyleSheet.absoluteFill}
-                resizeMode={ResizeMode.COVER}
-                isLooping
-                isMuted={!purchaseUnlocked}
-                shouldPlay={visible && phase === "playing"}
-                onPlaybackStatusUpdate={handlePlaybackStatus}
-              />
-            ) : null}
-
-            {!videoReady ? (
-              <View style={styles.videoLoading}>
-                <ActivityIndicator size="large" color={ACCENT} />
-              </View>
-            ) : null}
+          <View style={[styles.videoFrame, { width: frameWidth, height: frameHeight, borderRadius: VIDEO_RADIUS }]}>
+            <SequentialReelPlayer
+              clips={reelClips}
+              style={StyleSheet.absoluteFill}
+              loop
+              muted={!purchaseUnlocked}
+              autoPlay
+            />
           </View>
 
           {/* Bottom content */}
-          {videoReady ? (
-            <Animated.View
-              style={[
-                styles.bottomSection,
-                { opacity: contentAnim, transform: [{ translateY: contentTranslateY }] },
-              ]}
-            >
-              <Text style={styles.dayCount}>{daySpan} days</Text>
+          <Animated.View
+            style={[
+              styles.bottomSection,
+              { opacity: contentAnim, transform: [{ translateY: contentTranslateY }] },
+            ]}
+          >
+            <Text style={styles.dayCount}>{daySpan} days</Text>
 
-              {purchaseUnlocked ? (
-                <>
-                  <TactilePressable
-                    style={styles.shareButton}
-                    stretch
-                    pressScale={0.96}
-                    onPress={() => { void handleShare(); }}
-                  >
-                    <Text style={styles.shareButtonText}>share to tiktok</Text>
-                  </TactilePressable>
-
-                  <TactilePressable
-                    style={styles.saveLink}
-                    pressScale={0.97}
-                    onPress={() => { void handleSave(); }}
-                    disabled={saveState === "saving"}
-                  >
-                    <Text style={styles.saveLinkText}>
-                      {saveState === "idle"
-                        ? "save to camera roll"
-                        : saveState === "saving"
-                          ? "saving..."
-                          : "saved ✓"}
-                    </Text>
-                  </TactilePressable>
-                </>
-              ) : (
-                <TactilePressable
-                  style={styles.unlockButton}
-                  stretch
-                  pressScale={0.96}
-                  onPress={() => {
-                    triggerSelectionHaptic();
-                    setPaywallVisible(true);
-                  }}
-                >
-                  <Text style={styles.shareButtonText}>🔇 unlock audio + export</Text>
-                </TactilePressable>
-              )}
-            </Animated.View>
-          ) : null}
+            {purchaseUnlocked ? (
+              <TactilePressable
+                style={[styles.shareButton, composing && styles.shareButtonComposing]}
+                stretch
+                pressScale={composing ? 1 : 0.96}
+                onPress={composing ? undefined : () => { void handleShare(); }}
+              >
+                <Text style={styles.shareButtonText}>{composing ? "composing..." : "share to tiktok"}</Text>
+              </TactilePressable>
+            ) : (
+              <TactilePressable
+                style={styles.unlockButton}
+                stretch
+                pressScale={0.96}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  setPaywallVisible(true);
+                }}
+              >
+                <Text style={styles.shareButtonText}>unlock audio + export</Text>
+              </TactilePressable>
+            )}
+          </Animated.View>
         </View>
       ) : null}
 
@@ -343,7 +361,6 @@ export default function ChapterRevealScreen({
         onPurchased={() => {
           setPaywallVisible(false);
           setPurchaseBump((v) => v + 1);
-          setPhase("playing");
         }}
       />
     </Animated.View>
@@ -428,18 +445,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
   },
-  retryButton: {
-    marginTop: 12,
-    paddingHorizontal: 28,
-    paddingVertical: 12,
-    borderRadius: 22,
-    backgroundColor: ACCENT,
-  },
-  retryButtonText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
-  },
   // Playing phase
   content: {
     flex: 1,
@@ -453,7 +458,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   videoFrame: {
-    borderRadius: VIDEO_RADIUS,
     overflow: "hidden",
     backgroundColor: "#e8e2d8",
     shadowColor: "#000",
@@ -461,12 +465,6 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
-  },
-  videoLoading: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#e8e2d8",
   },
   bottomSection: {
     alignItems: "center",
@@ -497,18 +495,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  shareButtonComposing: {
+    opacity: 0.7,
+  },
   shareButtonText: {
     color: "#fff",
     fontSize: 17,
     fontWeight: "800",
-  },
-  saveLink: {
-    alignSelf: "center",
-    paddingVertical: 12,
-  },
-  saveLinkText: {
-    color: "rgba(0,0,0,0.35)",
-    fontSize: 14,
-    fontWeight: "600",
   },
 });

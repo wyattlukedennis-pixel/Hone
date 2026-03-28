@@ -1,0 +1,9 @@
+node_modules
+mobile
+.claude
+.git
+*.md
+.env*
+backend/node_modules
+backend/dist
+backend/uploads

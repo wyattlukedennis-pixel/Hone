@@ -69,7 +69,7 @@ function mediaRelativePathFromUrl(url: string) {
 }
 
 function createRenderKey(input: RevealRenderInput) {
-  const rendererVersion = "v10";
+  const rendererVersion = "v11"; // bumped for new spec: hard cuts, audio, no text
   const signature = {
     rendererVersion,
     journeyId: input.journeyId,
@@ -77,9 +77,6 @@ function createRenderKey(input: RevealRenderInput) {
     milestoneLengthDays: input.milestoneLengthDays,
     progressDays: input.progressDays,
     currentStreak: input.currentStreak,
-    storylineHeadline: input.storylineHeadline ?? null,
-    storylineCaption: input.storylineCaption ?? null,
-    storylineReflection: input.storylineReflection ?? null,
     clips: input.clips.map((clip) => ({
       id: clip.id,
       captureType: clip.captureType,
@@ -155,72 +152,73 @@ async function resolveClipSourcePath(clip: Clip, tempDir: string, index: number)
   return destination;
 }
 
+/**
+ * Build a single clip segment: scale/crop to 1080x1920, trim to duration.
+ *
+ * - Includes original audio from video clips
+ * - No text overlays (user adds native TikTok text after export)
+ * - Photos get silent audio track for concat compatibility
+ */
 async function buildClipSegment(params: {
   sourcePath: string;
   outputPath: string;
   captureType: "video" | "photo";
   durationSeconds: number;
 }) {
-  // Clean fullscreen — no text, no overlays. User adds their own in TikTok/CapCut.
   const baseFilter = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1";
 
-  const inputArgs =
-    params.captureType === "photo"
-      ? ["-loop", "1", "-t", params.durationSeconds.toFixed(2), "-i", params.sourcePath]
-      : ["-i", params.sourcePath, "-t", params.durationSeconds.toFixed(2)];
-
-  const audioArgs = params.captureType === "photo" ? ["-an"] : [];
-
-  await runFfmpeg([
-    "-y",
-    ...inputArgs,
-    "-vf", baseFilter,
-    "-r", "30",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-crf", "23",
-    "-pix_fmt", "yuv420p",
-    ...audioArgs,
-    params.outputPath
-  ]);
-}
-
-async function buildFlashSegment(outputPath: string) {
-  // 2-frame white flash (≈0.067s at 30fps)
-  await runFfmpeg([
-    "-y",
-    "-f", "lavfi", "-i", "color=c=white:s=1080x1920:r=30:d=0.067",
-    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-crf", "18",
-    "-pix_fmt", "yuv420p",
-    "-c:a", "aac",
-    "-shortest",
-    outputPath
-  ]);
-}
-
-async function concatSegments(segmentPaths: string[], outputPath: string, tempDir: string) {
-  // Insert white flash between each clip segment
-  const flashPath = path.join(tempDir, "flash.mp4");
-  await buildFlashSegment(flashPath);
-
-  const withFlashes: string[] = [];
-  for (let i = 0; i < segmentPaths.length; i++) {
-    withFlashes.push(segmentPaths[i]);
-    if (i < segmentPaths.length - 1) {
-      withFlashes.push(flashPath);
-    }
+  if (params.captureType === "photo") {
+    // Photo → video with silent audio for concat compatibility
+    await runFfmpeg([
+      "-y",
+      "-loop", "1",
+      "-t", params.durationSeconds.toFixed(2),
+      "-i", params.sourcePath,
+      "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+      "-vf", baseFilter,
+      "-r", "30",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-shortest",
+      params.outputPath
+    ]);
+  } else {
+    // Video — keep original audio, trim to duration
+    await runFfmpeg([
+      "-y",
+      "-i", params.sourcePath,
+      "-t", params.durationSeconds.toFixed(2),
+      "-vf", baseFilter,
+      "-r", "30",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-ar", "44100",
+      "-ac", "2",
+      params.outputPath
+    ]);
   }
+}
 
+/**
+ * Concatenate segments with hard cuts (no transitions, no flashes).
+ */
+async function concatSegments(segmentPaths: string[], outputPath: string, tempDir: string) {
   const concatListPath = path.join(tempDir, "segments.txt");
-  const concatLines = withFlashes.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
+  const concatLines = segmentPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
   await writeFile(concatListPath, `${concatLines}\n`, "utf8");
 
   try {
+    // Try stream copy first (fastest)
     await runFfmpeg(["-y", "-f", "concat", "-safe", "0", "-i", concatListPath, "-c", "copy", outputPath]);
   } catch {
+    // Fallback: re-encode if stream copy fails due to codec differences
     await runFfmpeg([
       "-y",
       "-f", "concat",
@@ -230,66 +228,101 @@ async function concatSegments(segmentPaths: string[], outputPath: string, tempDi
       "-preset", "veryfast",
       "-crf", "23",
       "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "128k",
       "-r", "30",
+      "-movflags", "+faststart",
       outputPath
     ]);
   }
 }
 
 /**
- * Compute per-clip durations that feel like a TikTok progress reel.
+ * Compute per-clip durations for the reveal montage.
  *
- * Pattern: day 1 lingers → middle clips accelerate → last clip is the payoff.
- * Target total: 15-25s depending on clip count.
+ * Spec:
+ * - First clip:   2s
+ * - Middle clips:  1.5s each (use actual duration if clip is shorter)
+ * - Final clip:   min 5s, max 10s, capped at actual clip duration if shorter
  *
- *   first clip:  3.0s  (let the cringe breathe)
- *   middle early: 1.5s → accelerates to 0.6s near the end
- *   last clip:   4.5s  (the payoff — let it land)
+ * The contrast between fast middle cuts and the held final clip IS the
+ * emotional moment. The reveal lands because everything was moving fast
+ * and then it stops.
  */
-function computeClipDurations(clipCount: number): number[] {
-  if (clipCount <= 1) return [5.0];
-  if (clipCount === 2) return [3.5, 4.5];
-  if (clipCount === 3) return [3.0, 1.5, 4.5];
-
-  const durations: number[] = [];
-  const middleCount = clipCount - 2;
-
-  // First clip: let day 1 breathe
-  durations.push(3.0);
-
-  // Middle clips: decelerate-to-accelerate curve
-  // Early middle clips are ~1.5s, ramp down to ~0.6s
-  for (let i = 0; i < middleCount; i++) {
-    const progress = i / Math.max(1, middleCount - 1); // 0 → 1
-    // Ease from 1.5 → 0.6 with a slight curve
-    const dur = 1.5 - progress * 0.9;
-    durations.push(Math.max(0.5, Math.round(dur * 100) / 100));
+function computeClipDurations(clipCount: number, clips: Clip[]): number[] {
+  if (clipCount <= 1) {
+    // Single clip: hold for 5-10s
+    const actualSeconds = (clips[0]?.durationMs ?? 5000) / 1000;
+    return [Math.min(10, Math.max(5, actualSeconds))];
   }
 
-  // Last clip: the payoff
-  durations.push(4.5);
+  if (clipCount === 2) {
+    const lastActual = (clips[1]?.durationMs ?? 5000) / 1000;
+    return [2, Math.min(10, Math.max(5, lastActual))];
+  }
+
+  const durations: number[] = [];
+
+  // First clip: 2s
+  durations.push(2);
+
+  // Middle clips: 1.5s each (capped at actual duration if shorter)
+  for (let i = 1; i < clipCount - 1; i++) {
+    const actualSeconds = (clips[i]?.durationMs ?? 1500) / 1000;
+    durations.push(Math.min(1.5, actualSeconds));
+  }
+
+  // Final clip: min 5s, max 10s, capped at actual duration
+  const lastClipDuration = (clips[clipCount - 1]?.durationMs ?? 5000) / 1000;
+  durations.push(Math.min(10, Math.max(5, lastClipDuration)));
 
   return durations;
 }
 
 /**
- * TikTok-native reveal montage renderer.
+ * Determine clip count based on journey length (matches mobile reelBuilder).
+ */
+function clipCountForJourneyDays(journeyDays: number): number {
+  if (journeyDays <= 14) return 5;
+  if (journeyDays <= 30) return 7;
+  if (journeyDays <= 60) return 9;
+  if (journeyDays <= 100) return 11;
+  return 13;
+}
+
+/**
+ * Reveal montage renderer.
  *
- * - No title card — jumps straight into day 1
- * - Fullscreen clips, no borders or boxes
- * - Minimal lowercase "day X" text bottom-left with drop shadow
- * - White flash hard cuts between clips
- * - Up to 12 clips for a real progression arc
- * - Pacing: day 1 lingers → middle accelerates → last clip pays off
- * - Target duration: 15-25 seconds
+ * - Hard cuts only between clips (no fades, no white flash)
+ * - Includes original audio from clips
+ * - No text overlays — user adds native TikTok text after export
+ * - First clip 2s, middle clips 1.5s, final clip 5-10s
+ * - Up to 13 clips scaled by journey length
+ * - Clean fullscreen 1080x1920 vertical export
  */
 export async function renderRevealMontage(input: RevealRenderInput): Promise<RevealRenderResult> {
   const chapterNumber = clampPositiveInt(input.chapterNumber, 1);
   const milestoneLengthDays = clampPositiveInt(input.milestoneLengthDays, 7);
   const progressDays = clampNonNegativeInt(input.progressDays, 0);
   const currentStreak = clampNonNegativeInt(input.currentStreak, 0);
-  // Pull up to 12 clips for a real progression arc
-  const clipCandidates = selectTimelineClips(input.clips, 12);
+
+  // Sort all clips chronologically
+  const allClipsSorted = sortClipsByTimeAscending(input.clips);
+
+  // Determine journey span and target clip count
+  let journeyDays = milestoneLengthDays;
+  if (allClipsSorted.length >= 2) {
+    const firstDate = allClipsSorted[0].recordedAt;
+    const lastDate = allClipsSorted[allClipsSorted.length - 1].recordedAt;
+    journeyDays = Math.max(
+      1,
+      Math.ceil((lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    );
+  }
+
+  const maxClips = clipCountForJourneyDays(journeyDays);
+  const clipCandidates = selectTimelineClips(allClipsSorted, maxClips);
+
   if (!clipCandidates.length) {
     throw new Error("RENDER_NO_CLIPS");
   }
@@ -320,14 +353,14 @@ export async function renderRevealMontage(input: RevealRenderInput): Promise<Rev
 
   const tempDir = await mkdtemp(path.join(tmpdir(), "hone-reveal-render-"));
 
-  const durations = computeClipDurations(clipCandidates.length);
+  const durations = computeClipDurations(clipCandidates.length, clipCandidates);
 
   try {
     const clipSegments: string[] = [];
     let skippedClipCount = 0;
     for (let index = 0; index < clipCandidates.length; index += 1) {
       const clip = clipCandidates[index];
-      const durationSeconds = durations[index] ?? 1.0;
+      const durationSeconds = durations[index] ?? 1.5;
 
       try {
         const sourcePath = await resolveClipSourcePath(clip, tempDir, index);
@@ -348,7 +381,7 @@ export async function renderRevealMontage(input: RevealRenderInput): Promise<Rev
       throw new Error("RENDER_NO_VALID_CLIPS");
     }
 
-    // No title card — straight into clips with white flash transitions
+    // Hard cuts — straight concat, no flashes
     await concatSegments(clipSegments, outputAbsolutePath, tempDir);
     return {
       outputRelativePath,

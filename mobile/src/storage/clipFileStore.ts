@@ -4,6 +4,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const LOCAL_URIS_KEY = "hone.clips.localUris.v1";
 const CLIPS_DIR = `${FileSystem.documentDirectory}clips/`;
 
+/** The relative prefix stored in the map — everything under Documents/clips/ */
+const RELATIVE_PREFIX = "clips/";
+
 function inferExtension(fileUri: string, captureType: "video" | "photo") {
   const lower = fileUri.split("?")[0].toLowerCase();
   if (captureType === "photo") {
@@ -18,6 +21,55 @@ function inferExtension(fileUri: string, captureType: "video" | "photo") {
 
 function makeId() {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Convert an absolute file URI to a relative path under documentDirectory.
+ * Handles stale container UUIDs from previous dev builds.
+ */
+function toRelativePath(uri: string): string {
+  // Already relative
+  if (!uri.startsWith("file://") && !uri.startsWith("/")) return uri;
+
+  // Try stripping current documentDirectory
+  const docDir = FileSystem.documentDirectory ?? "";
+  if (uri.startsWith(docDir)) {
+    return uri.slice(docDir.length);
+  }
+
+  // Handle stale absolute paths with old container UUIDs:
+  // file:///var/mobile/Containers/Data/Application/{OLD-UUID}/Documents/clips/...
+  const marker = "/Documents/";
+  const markerIndex = uri.indexOf(marker);
+  if (markerIndex >= 0) {
+    return uri.slice(markerIndex + marker.length);
+  }
+
+  return uri;
+}
+
+/**
+ * Resolve a stored path (relative or absolute) to the current absolute URI.
+ */
+function toAbsoluteUri(stored: string): string {
+  // Already a full file URI pointing to current container — use as-is
+  const docDir = FileSystem.documentDirectory ?? "";
+  if (stored.startsWith(docDir)) return stored;
+
+  // Relative path — prepend current documentDirectory
+  if (!stored.startsWith("file://") && !stored.startsWith("/")) {
+    return `${docDir}${stored}`;
+  }
+
+  // Stale absolute path — rebase to current container
+  const marker = "/Documents/";
+  const markerIndex = stored.indexOf(marker);
+  if (markerIndex >= 0) {
+    const relativePart = stored.slice(markerIndex + marker.length);
+    return `${docDir}${relativePart}`;
+  }
+
+  return stored;
 }
 
 /**
@@ -41,38 +93,48 @@ export async function persistClipFile(
 
 /** Store the mapping from a server-assigned clip ID to its local file URI. */
 export async function registerClipLocalUri(clipId: string, localUri: string): Promise<void> {
-  const map = await readMap();
-  map[clipId] = localUri;
+  const map = await readMapRaw();
+  // Store as relative path so it survives container UUID changes
+  map[clipId] = toRelativePath(localUri);
   await AsyncStorage.setItem(LOCAL_URIS_KEY, JSON.stringify(map));
 }
 
 /** Look up the local file URI for a clip ID. */
 export async function getClipLocalUri(clipId: string): Promise<string | null> {
-  const map = await readMap();
-  return map[clipId] ?? null;
+  const map = await readMapRaw();
+  const stored = map[clipId];
+  if (!stored) return null;
+  return toAbsoluteUri(stored);
 }
 
 /** Bulk read — used to overlay local URIs onto clips from the API. */
 export async function getAllClipLocalUris(): Promise<Record<string, string>> {
-  return readMap();
+  const raw = await readMapRaw();
+  const resolved: Record<string, string> = {};
+  for (const [id, stored] of Object.entries(raw)) {
+    resolved[id] = toAbsoluteUri(stored);
+  }
+  return resolved;
 }
 
 /** Remove mapping for a clip (used on delete/archive). */
 export async function removeClipLocalUri(clipId: string): Promise<void> {
-  const map = await readMap();
+  const map = await readMapRaw();
   delete map[clipId];
   await AsyncStorage.setItem(LOCAL_URIS_KEY, JSON.stringify(map));
 }
 
 /** Remove all mappings for a journey and delete the local files. */
 export async function clearLocalClipsForJourney(journeyId: string): Promise<void> {
-  const map = await readMap();
+  const map = await readMapRaw();
+  const journeyRelativePrefix = `${RELATIVE_PREFIX}${journeyId}/`;
   const dir = `${CLIPS_DIR}${journeyId}/`;
 
-  // Remove mappings whose value starts with this journey's directory
+  // Remove mappings whose value matches this journey's directory
   const updated: Record<string, string> = {};
   for (const [id, uri] of Object.entries(map)) {
-    if (!uri.startsWith(dir)) {
+    const relative = toRelativePath(uri);
+    if (!relative.startsWith(journeyRelativePrefix)) {
       updated[id] = uri;
     }
   }
@@ -89,7 +151,7 @@ export async function clearLocalClipsForJourney(journeyId: string): Promise<void
   }
 }
 
-async function readMap(): Promise<Record<string, string>> {
+async function readMapRaw(): Promise<Record<string, string>> {
   try {
     const raw = await AsyncStorage.getItem(LOCAL_URIS_KEY);
     if (!raw) return {};
