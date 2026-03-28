@@ -16,6 +16,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_REVENUECAT_API_KEY": "test_bOGheenoavgwsqXIwFZtnOnlnUk"
+      },
       "ios": {
         "buildNumber": "1"
       }
@@ -24,9 +27,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "",
-        "ascAppId": "",
-        "appleTeamId": ""
+        "appleId": "wyattlukedennis@gmail.com",
+        "ascAppId": "6761286677",
+        "appleTeamId": "C3FA392LCX"
       }
     }
   }
