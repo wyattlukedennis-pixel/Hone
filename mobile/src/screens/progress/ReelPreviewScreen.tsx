@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Image,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,10 +13,14 @@ import {
 import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import * as MediaLibrary from "expo-media-library";
 import { PaywallModal } from "../../components/PaywallModal";
 import { TactilePressable } from "../../components/TactilePressable";
-import { triggerSelectionHaptic, playRevealSound } from "../../utils/feedback";
+import { triggerSelectionHaptic, triggerMilestoneHaptic, playRevealSound } from "../../utils/feedback";
 import { hasRevealExportPurchase } from "../../utils/purchases";
+import { renderTimelapseVideo } from "../../utils/reelExport";
 
 type ReelPreviewScreenProps = {
   visible: boolean;
@@ -29,6 +34,9 @@ type ReelPreviewScreenProps = {
   // Timelapse props
   mode?: "video" | "timelapse";
   timelapsePhotos?: Array<{ uri: string; label: string }>;
+  // For timelapse export
+  token?: string;
+  journeyId?: string;
 };
 
 const ACCENT_ORANGE = "#E8450A";
@@ -52,6 +60,8 @@ export default function ReelPreviewScreen({
   onClose,
   mode,
   timelapsePhotos,
+  token,
+  journeyId,
 }: ReelPreviewScreenProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -59,6 +69,8 @@ export default function ReelPreviewScreen({
   const [videoReady, setVideoReady] = useState(false);
   const [showIntention, setShowIntention] = useState(!!goalText);
   const [paywallVisible, setPaywallVisible] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [exporting, setExporting] = useState(false);
   const [purchaseBump, setPurchaseBump] = useState(0);
   const purchaseUnlocked = hasRevealExportPurchase() || purchaseBump > 0;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -76,7 +88,7 @@ export default function ReelPreviewScreen({
   const videoPadding = 20;
   const frameWidth = width - videoPadding * 2;
   const frameHeight = (frameWidth * 16) / 9;
-  const maxFrameHeight = height - insets.top - insets.bottom - 180;
+  const maxFrameHeight = height - insets.top - insets.bottom - 240;
   const finalFrameHeight = Math.min(frameHeight, maxFrameHeight);
   const finalFrameWidth = (finalFrameHeight * 9) / 16;
 
@@ -91,6 +103,8 @@ export default function ReelPreviewScreen({
       setTimelapseReady(false);
       setSpeedPreset("medium");
       setFirstLoopDone(false);
+      setSaveState("idle");
+      setExporting(false);
       fadeAnim.setValue(0);
       contentAnim.setValue(0);
       intentionAnim.setValue(1);
@@ -187,6 +201,76 @@ export default function ReelPreviewScreen({
     }).start();
   }
 
+  async function renderTimelapse(): Promise<string | null> {
+    if (!token || !journeyId) return null;
+    setExporting(true);
+    try {
+      const uri = await renderTimelapseVideo(token, journeyId, SPEED_MAP[speedPreset]);
+      return uri;
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleShare() {
+    if (!purchaseUnlocked) { setPaywallVisible(true); return; }
+    triggerSelectionHaptic();
+
+    if (effectiveMode === "timelapse") {
+      const videoUri = await renderTimelapse();
+      if (!videoUri) return;
+      try {
+        await Sharing.shareAsync(videoUri, { mimeType: "video/mp4" });
+      } catch { /* user cancelled */ }
+      return;
+    }
+
+    // Video mode — share current clip
+    if (!currentUri) return;
+    try {
+      let localUri = currentUri;
+      if (currentUri.startsWith("http")) {
+        const dest = `${FileSystem.cacheDirectory}hone-share-${Date.now()}.mp4`;
+        const { uri: downloaded } = await FileSystem.downloadAsync(currentUri, dest);
+        localUri = downloaded;
+      }
+      await Sharing.shareAsync(localUri, { mimeType: "video/mp4" });
+    } catch { /* user cancelled */ }
+  }
+
+  async function handleSave() {
+    if (!purchaseUnlocked) { setPaywallVisible(true); return; }
+    if (saveState !== "idle") return;
+    triggerSelectionHaptic();
+    const { status } = await MediaLibrary.requestPermissionsAsync(true);
+    if (status !== "granted") return;
+    setSaveState("saving");
+    try {
+      let localUri: string | null = null;
+
+      if (effectiveMode === "timelapse") {
+        localUri = await renderTimelapse();
+      } else if (currentUri) {
+        localUri = currentUri;
+        if (currentUri.startsWith("http")) {
+          const dest = `${FileSystem.cacheDirectory}hone-save-${Date.now()}.mp4`;
+          const { uri: downloaded } = await FileSystem.downloadAsync(currentUri, dest);
+          localUri = downloaded;
+        }
+      }
+
+      if (localUri) {
+        await MediaLibrary.saveToLibraryAsync(localUri);
+        setSaveState("saved");
+        triggerMilestoneHaptic();
+      } else {
+        setSaveState("idle");
+      }
+    } catch {
+      setSaveState("idle");
+    }
+  }
+
   const contentTranslateY = contentAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [20, 0],
@@ -195,10 +279,11 @@ export default function ReelPreviewScreen({
   if (!visible) return null;
 
   return (
-    <Animated.View style={[styles.root, { opacity: fadeAnim, width, height }]}>
+    <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={onClose}>
+    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
       {/* Close button */}
       <Pressable
-        style={[styles.closeButton, { top: insets.top + 8 }]}
+        style={[styles.closeButton, { top: insets.top + 4 }]}
         onPress={() => {
           triggerSelectionHaptic();
           onClose();
@@ -257,16 +342,13 @@ export default function ReelPreviewScreen({
           {effectiveMode === "timelapse" && timelapsePhotos?.length ? (
             <>
               <Image
+                key={timelapseIndex}
                 source={{ uri: timelapsePhotos[timelapseIndex]?.uri }}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
+                fadeDuration={0}
               />
-              {/* Day label overlay */}
-              <View style={styles.timelapseLabelWrap}>
-                <Text style={styles.timelapseLabel}>
-                  {timelapsePhotos[timelapseIndex]?.label}
-                </Text>
-              </View>
+              {/* Day label removed — shown above the frame instead */}
             </>
           ) : currentUri ? (
             <Video
@@ -333,10 +415,32 @@ export default function ReelPreviewScreen({
               </>
             )}
 
-            {/* Unlock prompt for free users */}
-            {!purchaseUnlocked ? (
+            {/* Share/Save or Unlock */}
+            {purchaseUnlocked ? (
+              <View style={styles.exportRow}>
+                <TactilePressable
+                  style={styles.shareButton}
+                  stretch
+                  pressScale={0.96}
+                  onPress={() => { void handleShare(); }}
+                >
+                  <Text style={styles.shareButtonText}>{exporting ? "rendering..." : "share to tiktok"}</Text>
+                </TactilePressable>
+                <TactilePressable
+                  style={styles.saveLink}
+                  pressScale={0.97}
+                  onPress={() => { void handleSave(); }}
+                  disabled={saveState === "saving"}
+                >
+                  <Text style={styles.saveLinkText}>
+                    {saveState === "idle" ? "save to camera roll" : saveState === "saving" ? "saving..." : "saved ✓"}
+                  </Text>
+                </TactilePressable>
+              </View>
+            ) : (
               <TactilePressable
                 style={styles.unlockPill}
+                stretch
                 pressScale={0.96}
                 onPress={() => {
                   triggerSelectionHaptic();
@@ -345,7 +449,7 @@ export default function ReelPreviewScreen({
               >
                 <Text style={styles.unlockPillText}>🔇 unlock audio + export</Text>
               </TactilePressable>
-            ) : null}
+            )}
           </Animated.View>
         ) : null}
       </View>
@@ -359,17 +463,14 @@ export default function ReelPreviewScreen({
         }}
       />
     </Animated.View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    position: "absolute",
-    top: 0,
-    left: 0,
+    flex: 1,
     backgroundColor: "#f4efe6",
-    zIndex: 9999,
-    elevation: 9999,
   },
   content: {
     flex: 1,
@@ -396,7 +497,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   dayLabel: {
     fontSize: 16,
@@ -424,8 +525,10 @@ const styles = StyleSheet.create({
   },
   bottomSection: {
     alignItems: "center",
-    paddingTop: 16,
-    gap: 8,
+    alignSelf: "stretch",
+    paddingTop: 20,
+    paddingHorizontal: 24,
+    gap: 4,
   },
   togglePill: {
     flexDirection: "row",
@@ -455,16 +558,17 @@ const styles = StyleSheet.create({
     color: "rgba(0,0,0,0.15)",
   },
   unlockPill: {
-    marginTop: 12,
+    width: "100%",
+    height: 54,
+    borderRadius: 27,
     backgroundColor: ACCENT_ORANGE,
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
   },
   unlockPillText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "700",
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "800",
   },
   intentionOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -517,6 +621,33 @@ const styles = StyleSheet.create({
   },
   speedPillTextActive: {
     color: "#ffffff",
+  },
+  exportRow: {
+    width: "100%",
+    alignItems: "center",
+    gap: 4,
+  },
+  shareButton: {
+    width: "100%",
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: ACCENT_ORANGE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareButtonText: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  saveLink: {
+    alignSelf: "center",
+    paddingVertical: 8,
+  },
+  saveLinkText: {
+    color: "rgba(0,0,0,0.3)",
+    fontSize: 13,
+    fontWeight: "600",
   },
   timelapseLabelWrap: {
     position: "absolute",

@@ -360,3 +360,95 @@ export async function renderRevealMontage(input: RevealRenderInput): Promise<Rev
     await rm(tempDir, { recursive: true, force: true });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Photo timelapse renderer
+// ---------------------------------------------------------------------------
+
+export type TimelapseRenderInput = {
+  journeyId: string;
+  clips: Clip[];
+  holdMs: number;
+};
+
+export type TimelapseRenderResult = {
+  outputRelativePath: string;
+  cacheHit: boolean;
+  photoCount: number;
+};
+
+export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise<TimelapseRenderResult> {
+  if (!ffmpegPath) throw new Error("FFMPEG_NOT_FOUND");
+
+  const photoClips = input.clips
+    .filter((c) => c.captureType === "photo")
+    .sort((a, b) => a.recordedOn.localeCompare(b.recordedOn));
+
+  if (!photoClips.length) throw new Error("TIMELAPSE_NO_PHOTOS");
+
+  const holdSeconds = Math.max(0.05, input.holdMs / 1000);
+
+  // Cache key
+  const keyData = [
+    "timelapse-v2",
+    input.journeyId,
+    String(input.holdMs),
+    ...photoClips.map((c) => c.id),
+  ].join("|");
+  const hash = createHash("sha256").update(keyData).digest("hex").slice(0, 16);
+  const outputRelativePath = `renders/timelapse-${hash}.mp4`;
+  const outputAbsolutePath = path.join(config.uploads.dir, outputRelativePath);
+  await mkdir(path.dirname(outputAbsolutePath), { recursive: true });
+
+  // Check cache
+  try {
+    await access(outputAbsolutePath);
+    return { outputRelativePath, cacheHit: true, photoCount: photoClips.length };
+  } catch {
+    // not cached
+  }
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), "hone-timelapse-"));
+
+  try {
+    // Download / resolve each photo
+    const photoPaths: string[] = [];
+    for (let i = 0; i < photoClips.length; i++) {
+      const sourcePath = await resolveClipSourcePath(photoClips[i], tempDir, i);
+      photoPaths.push(sourcePath);
+    }
+
+    if (!photoPaths.length) throw new Error("TIMELAPSE_NO_VALID_PHOTOS");
+
+    // Build concat list
+    const concatLines: string[] = [];
+    for (const p of photoPaths) {
+      concatLines.push(`file '${p}'`);
+      concatLines.push(`duration ${holdSeconds}`);
+    }
+    // Repeat last entry so ffmpeg doesn't cut it short
+    concatLines.push(`file '${photoPaths[photoPaths.length - 1]}'`);
+    concatLines.push(`duration ${holdSeconds}`);
+
+    const concatFile = path.join(tempDir, "list.txt");
+    await writeFile(concatFile, concatLines.join("\n"), "utf-8");
+
+    // Render
+    await execFileAsync(ffmpegPath, [
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatFile,
+      "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30",
+      "-c:v", "libx264",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "-an",
+      "-y", outputAbsolutePath,
+    ], { maxBuffer: 50 * 1024 * 1024 });
+
+    return { outputRelativePath, cacheHit: false, photoCount: photoPaths.length };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}

@@ -95,6 +95,7 @@ export default function App() {
   const [manageJourneys, setManageJourneys] = useState<Journey[]>([]);
   const [manageClipsByJourney, setManageClipsByJourney] = useState<Record<string, Clip[]>>({});
   const [manageUpdatingId, setManageUpdatingId] = useState<string | null>(null);
+  const [progressFullscreen, setProgressFullscreen] = useState(false);
   const [deepLinkRecorderSignal, setDeepLinkRecorderSignal] = useState(0);
   const [deepLinkRecorderJourneyId, setDeepLinkRecorderJourneyId] = useState<string | null>(null);
   const [openRevealSignal, setOpenRevealSignal] = useState(0);
@@ -497,6 +498,7 @@ export default function App() {
           openRevealSignal={openRevealSignal}
           progressEntrySignal={progressEntrySignal}
           recordingsRevision={recordingsRevision}
+          onFullscreenChange={setProgressFullscreen}
         />
       ) : null;
   }, [
@@ -640,7 +642,7 @@ export default function App() {
                 />
               )}
             </Animated.View>
-            {session ? <TabBar activeTab={tab} onSelect={setTab} /> : null}
+            {session && !progressFullscreen ? <TabBar activeTab={tab} onSelect={setTab} /> : null}
             <StatusBar style="dark" />
           </SafeAreaView>
         )}

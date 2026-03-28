@@ -476,3 +476,32 @@ export async function resolveReelUri(input: ExportReelInput): Promise<string | n
     return null;
   }
 }
+
+/**
+ * Render a photo timelapse video on the server and download it locally.
+ * Returns a local file URI on success, null on failure.
+ */
+export async function renderTimelapseVideo(
+  token: string,
+  journeyId: string,
+  holdMs: number,
+): Promise<string | null> {
+  try {
+    const response = await requestJson<{ url: string; photoCount: number }>(
+      `/journeys/${journeyId}/timelapse/render`,
+      { method: "POST", token, body: { holdMs } },
+    );
+
+    if (!response.url) return null;
+
+    // The URL is relative — build full URL
+    const { env } = await import("../env");
+    const fullUrl = `${env.apiBaseUrl}${response.url}`;
+    const localPath = `${FileSystem.cacheDirectory}hone-timelapse-${Date.now()}.mp4`;
+    const { uri } = await FileSystem.downloadAsync(fullUrl, localPath);
+    return uri;
+  } catch (error) {
+    if (__DEV__) console.error("[reelExport] renderTimelapseVideo failed:", error);
+    return null;
+  }
+}

@@ -35,6 +35,7 @@ type ProgressScreenProps = {
   openRevealSignal?: number;
   progressEntrySignal?: number;
   recordingsRevision: number;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 };
 
 type RevealSourceRect = {
@@ -68,7 +69,8 @@ export function ProgressScreen({
   devNowDayOffset = 0,
   openRevealSignal = 0,
   progressEntrySignal = 0,
-  recordingsRevision
+  recordingsRevision,
+  onFullscreenChange
 }: ProgressScreenProps) {
   const { height } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
@@ -118,6 +120,11 @@ export function ProgressScreen({
   const [reelMode, setReelMode] = useState<"video" | "timelapse">("video");
   const [timelapsePhotos, setTimelapsePhotos] = useState<Array<{ uri: string; label: string }>>([]);
   const [composedDaySpan, setComposedDaySpan] = useState(0);
+
+  // Notify parent when fullscreen overlay is active (hides tab bar)
+  useEffect(() => {
+    onFullscreenChange?.(reelPreviewVisible || chapterRevealOpen);
+  }, [reelPreviewVisible, chapterRevealOpen, onFullscreenChange]);
 
   const {
     journeys,
@@ -1372,6 +1379,8 @@ export function ProgressScreen({
         onClose={() => setReelPreviewVisible(false)}
         mode={reelMode}
         timelapsePhotos={reelMode === "timelapse" ? timelapsePhotos : undefined}
+        token={token}
+        journeyId={selectedJourney?.id}
       />
       <ChapterRevealScreen
         visible={chapterRevealOpen}

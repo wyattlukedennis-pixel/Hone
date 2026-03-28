@@ -4,7 +4,7 @@ import { requireAuth } from "../auth/guard.js";
 import { listClipsForJourney } from "../clips/repository.js";
 import { getPool } from "../db/pool.js";
 import { findJourneyByIdForUser } from "../journeys/repository.js";
-import { renderRevealMontage } from "./revealRenderer.js";
+import { renderRevealMontage, renderPhotoTimelapse } from "./revealRenderer.js";
 import {
   createComparisonRender,
   createMilestoneRender,
@@ -326,5 +326,43 @@ export function registerProgressRoutes(app: FastifyInstance) {
     });
     if (!milestone) return reply.code(404).send({ error: "MILESTONE_NOT_FOUND" });
     return reply.send({ milestone });
+  });
+
+  // -----------------------------------------------------------------------
+  // Photo timelapse render
+  // -----------------------------------------------------------------------
+  app.post<{
+    Params: { journeyId: string };
+    Body: { holdMs?: number };
+  }>("/journeys/:journeyId/timelapse/render", async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+
+    const pool = getPool();
+    const journey = await findJourneyByIdForUser(pool, {
+      journeyId: request.params.journeyId,
+      userId: auth.user.id
+    });
+    if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
+
+    const holdMs = Number(request.body?.holdMs) || 500;
+    const clips = await listClipsForJourney(pool, request.params.journeyId);
+    const photoClips = clips.filter((c) => c.captureType === "photo");
+
+    if (!photoClips.length) {
+      return reply.code(400).send({ error: "NO_PHOTO_CLIPS" });
+    }
+
+    const result = await renderPhotoTimelapse({
+      journeyId: request.params.journeyId,
+      clips: photoClips,
+      holdMs,
+    });
+
+    return reply.send({
+      url: `/uploads/${result.outputRelativePath}`,
+      cacheHit: result.cacheHit,
+      photoCount: result.photoCount,
+    });
   });
 }
