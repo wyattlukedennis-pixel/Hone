@@ -17,7 +17,9 @@ import type { DevDateShiftSettings } from "../types/devTools";
 import { formatDailyMomentTime, getDailyMomentKey, isInDailyMomentWindow } from "../utils/dailyMoment";
 import { type ChapterTrailerMoment } from "../utils/progress";
 import { exportAndShareReel } from "../utils/reelExport";
-import { triggerSelectionHaptic } from "../utils/feedback";
+import { triggerSelectionHaptic, triggerMilestoneHaptic } from "../utils/feedback";
+import { buildWeeklyQuest } from "../utils/weeklyQuest";
+import { completeJourneyWeeklyQuest } from "../api/journeys";
 import { useReducedMotion } from "../utils/useReducedMotion";
 import { ActionButton } from "./practice/ActionButton";
 import { ManageJourneysModal } from "./practice/ManageJourneysModal";
@@ -303,6 +305,47 @@ export function JourneysScreen({
       trailerMoments: buildWeeklyTrailerMoments(weeklyClips)
     };
   }, [activeJourney?.id, activeJourney?.captureMode, activeJourneyClips, now]);
+  const weeklyQuest = useMemo(() => {
+    if (!activeJourney) return null;
+    return buildWeeklyQuest({
+      clips: activeJourneyClips,
+      captureMode: activeJourney.captureMode,
+      now,
+      streak: normalizedStreak,
+      chapterCompletions: Math.max(0, chapterNumber - 1),
+    });
+  }, [activeJourney?.id, activeJourney?.captureMode, activeJourneyClips, now, normalizedStreak, chapterNumber]);
+  const questCompletedRef = useRef<string | null>(null);
+  const [questCelebrating, setQuestCelebrating] = useState(false);
+  const questCelebrationOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!weeklyQuest?.completed || !activeJourney) return;
+    const completionKey = `${activeJourney.id}:${weeklyQuest.weekKey}:${weeklyQuest.id}`;
+    if (questCompletedRef.current === completionKey) return;
+    questCompletedRef.current = completionKey;
+    // Fire completion to server (idempotent)
+    void completeJourneyWeeklyQuest(token, activeJourney.id, {
+      weekKey: weeklyQuest.weekKey,
+      questId: weeklyQuest.id,
+      rewardXp: weeklyQuest.rewardXp,
+    });
+    // Celebration animation
+    triggerMilestoneHaptic();
+    setQuestCelebrating(true);
+    Animated.sequence([
+      Animated.timing(questCelebrationOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.delay(2200),
+      Animated.timing(questCelebrationOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start(() => setQuestCelebrating(false));
+    trackEvent("weekly_quest_completed", {
+      journeyId: activeJourney.id,
+      questId: weeklyQuest.id,
+      tier: weeklyQuest.tier,
+      rewardXp: weeklyQuest.rewardXp,
+    });
+  }, [weeklyQuest?.completed, weeklyQuest?.weekKey, weeklyQuest?.id, activeJourney?.id]);
+
   const [weeklyProofSharing, setWeeklyProofSharing] = useState(false);
   const [weeklyProofMessage, setWeeklyProofMessage] = useState<string | null>(null);
   const [weeklyProofDismissed, setWeeklyProofDismissed] = useState(false);
@@ -722,6 +765,35 @@ export function JourneysScreen({
                 onPress={handlePrimaryAction}
               />
             </View>
+            {weeklyQuest && !chapterRevealReady ? (
+              <View style={styles.questRow}>
+                <View style={styles.questRowLeft}>
+                  <View style={styles.questRowHeader}>
+                    <Text style={styles.questRowTitle}>{weeklyQuest.title.toLowerCase()}</Text>
+                    <Text style={[styles.questRowXp, weeklyQuest.completed ? styles.questRowXpComplete : undefined]}>
+                      {weeklyQuest.rewardLabel}
+                    </Text>
+                  </View>
+                  <View style={styles.questRowTrack}>
+                    <View
+                      style={[
+                        styles.questRowFill,
+                        { width: `${Math.min(100, Math.round((weeklyQuest.progressDays / weeklyQuest.targetDays) * 100))}%` },
+                        weeklyQuest.completed ? styles.questRowFillComplete : undefined,
+                      ]}
+                    />
+                  </View>
+                </View>
+                <Text style={[styles.questRowProgress, weeklyQuest.completed ? styles.questRowProgressComplete : undefined]}>
+                  {weeklyQuest.completed ? "✓" : `${weeklyQuest.progressDays}/${weeklyQuest.targetDays}`}
+                </Text>
+              </View>
+            ) : null}
+            {questCelebrating ? (
+              <Animated.View style={[styles.questCelebration, { opacity: questCelebrationOpacity }]}>
+                <Text style={styles.questCelebrationText}>quest complete — {weeklyQuest?.rewardLabel}</Text>
+              </Animated.View>
+            ) : null}
             {/* @hidden */ false && (missedDayRecovery as NonNullable<typeof missedDayRecovery>) ? (
               <View style={styles.recoveryCard}>
                 <Text style={styles.recoveryTitle}>
@@ -1341,6 +1413,85 @@ const styles = StyleSheet.create({
   },
   chapterPrimaryActionRevealFocus: {
     marginBottom: 6
+  },
+  questRow: {
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(240,232,220,0.95)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  questRowLeft: {
+    flex: 1,
+    gap: 4,
+  },
+  questRowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  questRowTitle: {
+    flex: 1,
+    color: theme.colors.textPrimary,
+    fontSize: 12,
+    fontWeight: "800",
+    fontFamily: theme.typography.label,
+  },
+  questRowXp: {
+    color: theme.colors.accent,
+    fontSize: 11,
+    fontWeight: "800",
+    fontFamily: theme.typography.label,
+  },
+  questRowXpComplete: {
+    color: theme.colors.success,
+  },
+  questRowTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    overflow: "hidden",
+  },
+  questRowFill: {
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: theme.colors.accent,
+  },
+  questRowFillComplete: {
+    backgroundColor: theme.colors.success,
+  },
+  questRowProgress: {
+    color: "rgba(0,0,0,0.35)",
+    fontSize: 13,
+    fontWeight: "800",
+    minWidth: 28,
+    textAlign: "right",
+  },
+  questRowProgressComplete: {
+    color: theme.colors.success,
+  },
+  questCelebration: {
+    marginBottom: 6,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(21,122,63,0.25)",
+    backgroundColor: "rgba(21,122,63,0.12)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  questCelebrationText: {
+    color: "#0f4a28",
+    fontSize: 13,
+    fontWeight: "800",
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.3,
   },
   recoveryCard: {
     marginBottom: 6,
