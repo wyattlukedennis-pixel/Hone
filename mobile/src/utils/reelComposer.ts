@@ -3,7 +3,6 @@ import { getAllClipLocalUris } from "../storage/clipFileStore";
 import { uploadLocalClipForRender } from "../api/clips";
 import { requestJson } from "../api/http";
 import type { Clip } from "../types/clip";
-import type { ReelClipEntry } from "../components/SequentialReelPlayer";
 
 type ComposeRenderedResponse = {
   renderUrl: string;
