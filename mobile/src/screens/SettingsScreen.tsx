@@ -151,7 +151,7 @@ export function SettingsScreen({
       <GlassSurface style={styles.card}>
         <Text style={styles.cardLabel}>haptics</Text>
         <View style={styles.hapticsRow}>
-          {(["full", "light", "off"] as const).map((mode) => (
+          {(["standard", "subtle", "off"] as const).map((mode) => (
             <TactilePressable
               key={mode}
               style={[styles.hapticsChip, hapticsMode === mode ? styles.hapticsChipActive : undefined]}
