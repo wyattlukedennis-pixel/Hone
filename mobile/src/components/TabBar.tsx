@@ -11,6 +11,7 @@ import { useReducedMotion } from "../utils/useReducedMotion";
 type TabBarProps = {
   activeTab: TabKey;
   onSelect: (tab: TabKey) => void;
+  darkMode?: boolean;
 };
 
 const tabs: Array<{ key: TabKey; label: string }> = [
@@ -19,7 +20,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "settings", label: "manage" }
 ];
 
-export function TabBar({ activeTab, onSelect }: TabBarProps) {
+export function TabBar({ activeTab, onSelect, darkMode }: TabBarProps) {
   const [width, setWidth] = useState(0);
   const reducedMotion = useReducedMotion();
   const indicatorX = useRef(new Animated.Value(0)).current;
@@ -50,7 +51,7 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
 
   return (
     <View style={styles.safeWrap}>
-      <GlassSurface style={styles.container} intensity={14}>
+      <GlassSurface style={[styles.container, darkMode ? styles.containerDark : null]} intensity={14} tone={darkMode ? "dark" : "light"}>
         <View
           style={styles.row}
           onLayout={(event) => {
@@ -81,7 +82,7 @@ export function TabBar({ activeTab, onSelect }: TabBarProps) {
                 }}
                 style={styles.item}
               >
-                <Text style={[styles.label, active ? styles.labelActive : undefined]}>{tab.label}</Text>
+                <Text style={[styles.label, darkMode ? styles.labelDark : null, active ? styles.labelActive : undefined]}>{tab.label}</Text>
               </Pressable>
             );
           })}
@@ -149,5 +150,12 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontWeight: "900",
     fontFamily: theme.typography.label
+  },
+  containerDark: {
+    borderColor: theme.darkColors.tabBorder,
+    backgroundColor: theme.darkColors.tabBg,
+  },
+  labelDark: {
+    color: theme.darkColors.textSecondary,
   }
 });

@@ -21,6 +21,7 @@ import { hasRevealExportPurchase } from "../../utils/purchases";
 import { composeReel } from "../../utils/reelComposer";
 import type { ExportReelInput } from "../../utils/reelExport";
 import type { Clip } from "../../types/clip";
+import { theme } from "../../theme";
 import type { ReelClipEntry } from "../../components/SequentialReelPlayer";
 
 type ChapterRevealScreenProps = {
@@ -29,6 +30,7 @@ type ChapterRevealScreenProps = {
   daySpan: number;
   chapterNumber: number;
   goalText?: string | null;
+  darkMode?: boolean;
   onClose: () => void;
 };
 
@@ -122,6 +124,7 @@ export default function ChapterRevealScreen({
   daySpan,
   chapterNumber,
   goalText,
+  darkMode = false,
   onClose,
 }: ChapterRevealScreenProps) {
   const { width, height } = useWindowDimensions();
@@ -341,22 +344,22 @@ export default function ChapterRevealScreen({
 
   return (
     <Modal visible={visible} animationType="none" transparent={false} statusBarTranslucent onRequestClose={onClose}>
-    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+    <Animated.View style={[styles.root, darkMode && styles.rootDark, { opacity: fadeAnim }]}>
       {/* Close button */}
       <Pressable
-        style={[styles.closeButton, { top: insets.top + 8 }]}
+        style={[styles.closeButton, darkMode && styles.closeButtonDark, { top: insets.top + 8 }]}
         onPress={() => { triggerSelectionHaptic(); onClose(); }}
         hitSlop={16}
       >
-        <Text style={styles.closeButtonText}>✕</Text>
+        <Text style={[styles.closeButtonText, darkMode && styles.darkTextPrimary]}>✕</Text>
       </Pressable>
 
       {/* Intention phase */}
       {phase === "intention" && goalText ? (
-        <Animated.View style={[styles.intentionOverlay, { opacity: intentionAnim }]}>
-          <Text style={styles.intentionPreamble}>you said you wanted to...</Text>
-          <Text style={styles.intentionText}>{goalText}</Text>
-          <Text style={styles.intentionCta}>watch what happened.</Text>
+        <Animated.View style={[styles.intentionOverlay, darkMode && styles.intentionOverlayDark, { opacity: intentionAnim }]}>
+          <Text style={[styles.intentionPreamble, darkMode && styles.darkTextSecondary]}>you said you wanted to...</Text>
+          <Text style={[styles.intentionText, darkMode && styles.darkTextPrimary]}>{goalText}</Text>
+          <Text style={[styles.intentionCta, darkMode && styles.darkTextSecondary]}>watch what happened.</Text>
         </Animated.View>
       ) : null}
 
@@ -364,15 +367,15 @@ export default function ChapterRevealScreen({
       {phase === "loading" ? (
         <View style={styles.loadingContainer}>
           <LogoMorphLoader size={100} color={ACCENT} duration={900} />
-          <Text style={styles.loadingText}>building your reveal...</Text>
+          <Text style={[styles.loadingText, darkMode && styles.darkTextSecondary]}>building your reveal...</Text>
         </View>
       ) : null}
 
       {/* Error phase */}
       {phase === "error" ? (
         <View style={styles.loadingContainer}>
-          <Text style={styles.errorText}>couldn't build your reveal</Text>
-          <Text style={styles.errorSubtext}>record a few more clips to unlock your reel</Text>
+          <Text style={[styles.errorText, darkMode && styles.darkTextPrimary]}>couldn't build your reveal</Text>
+          <Text style={[styles.errorSubtext, darkMode && styles.darkTextSecondary]}>record a few more clips to unlock your reel</Text>
         </View>
       ) : null}
 
@@ -380,10 +383,10 @@ export default function ChapterRevealScreen({
       {phase === "playing" && reelClips.length > 0 ? (
         <View style={[styles.content, { paddingTop: insets.top + 48, paddingBottom: Math.max(insets.bottom + 12, 28) }]}>
           {/* Chapter label */}
-          <Text style={styles.chapterLabel}>chapter {chapterNumber} reveal</Text>
+          <Text style={[styles.chapterLabel, darkMode && styles.darkTextSecondary]}>chapter {chapterNumber} reveal</Text>
 
           {/* Video frame */}
-          <View style={[styles.videoFrame, { width: frameWidth, height: frameHeight, borderRadius: VIDEO_RADIUS }]}>
+          <View style={[styles.videoFrame, darkMode && styles.videoFrameDark, { width: frameWidth, height: frameHeight, borderRadius: VIDEO_RADIUS }]}>
             <SequentialReelPlayer
               clips={reelClips}
               style={StyleSheet.absoluteFill}
@@ -575,5 +578,24 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "800",
+  },
+  // Dark mode overrides
+  rootDark: {
+    backgroundColor: "#0f0f0f",
+  },
+  closeButtonDark: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  intentionOverlayDark: {
+    backgroundColor: "#0f0f0f",
+  },
+  videoFrameDark: {
+    backgroundColor: "#1a1816",
+  },
+  darkTextPrimary: {
+    color: theme.darkColors.textPrimary,
+  },
+  darkTextSecondary: {
+    color: theme.darkColors.textSecondary,
   },
 });

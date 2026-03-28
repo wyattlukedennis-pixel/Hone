@@ -63,6 +63,7 @@ export function PracticeRecorder({
   const [ticker, setTicker] = useState(0);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [cameraMounted, setCameraMounted] = useState(false);
+  const [ghostEnabled, setGhostEnabled] = useState(captureType === "photo");
   const transition = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
   const duration = (ms: number) => (reducedMotion ? 0 : ms);
@@ -75,6 +76,7 @@ export function PracticeRecorder({
       setRecordingStartedAtMs(null);
       setSaveErrorMessage(null);
       setCameraMounted(false);
+      setGhostEnabled(captureType === "photo");
       return;
     }
     // Stage the opening: animate sheet first, then mount camera to avoid dropped frames.
@@ -229,7 +231,7 @@ export function PracticeRecorder({
                     <Image source={{ uri: captured.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                   )
                 ) : null}
-                {referenceClipUrl && !captured ? (
+                {referenceClipUrl && ghostEnabled && !captured ? (
                   <View style={styles.ghostOverlay} pointerEvents="none">
                     <Image source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                     <Text style={styles.ghostLabel}>yesterday</Text>
@@ -242,6 +244,14 @@ export function PracticeRecorder({
                   </View>
                 ) : null}
                 <LinearGradient colors={["rgba(0,0,0,0.15)", "transparent", "rgba(0,0,0,0.2)"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+                {referenceClipUrl && !captured && !recording ? (
+                  <Pressable
+                    style={[styles.ghostToggle, ghostEnabled ? styles.ghostToggleActive : null]}
+                    onPress={() => setGhostEnabled((v) => !v)}
+                  >
+                    <Text style={styles.ghostToggleText}>{ghostEnabled ? "ghost on" : "ghost off"}</Text>
+                  </Pressable>
+                ) : null}
               </View>
 
               <View style={[styles.bottomOverlay, { paddingBottom: safeBottom }]}>
@@ -366,5 +376,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 0.3,
+  },
+  ghostToggle: {
+    position: "absolute",
+    bottom: 12,
+    left: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  ghostToggleActive: {
+    backgroundColor: "rgba(255,90,31,0.5)",
+  },
+  ghostToggleText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
 });

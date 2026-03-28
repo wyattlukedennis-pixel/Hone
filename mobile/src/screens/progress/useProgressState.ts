@@ -9,12 +9,14 @@ import type { Clip } from "../../types/clip";
 import type { Journey, JourneyReveal } from "../../types/journey";
 import { theme } from "../../theme";
 import { useReducedMotion } from "../../utils/useReducedMotion";
+import { readBestStreak, saveBestStreak } from "../../storage/bestStreakStorage";
 import {
   buildChapterComparisonPlan,
   buildProtocolConsistencyTrend,
   buildPracticeHeatmap,
   getChapterDayCount,
   getChapterStreak,
+  getLongestStreak,
   getMilestoneChapterProgress,
   getMilestoneStates,
   hasChapterClipToday
@@ -189,6 +191,18 @@ export function useProgressState({
   }, [revealTrackClips, selectedJourney?.id, selectedJourney?.milestoneLengthDays, selectedJourney?.milestoneStartDay, selectedJourney?.milestoneChapter]);
   const comparison = comparisonPlan?.comparison ?? null;
   const streak = chapterRule ? getChapterStreak(clips, chapterRule, effectiveNow) : 0;
+  const allTimeStreak = useMemo(() => getLongestStreak(clips), [clips]);
+  const [bestStreak, setBestStreak] = useState(0);
+  useEffect(() => {
+    void readBestStreak().then(setBestStreak);
+  }, []);
+  useEffect(() => {
+    const peak = Math.max(allTimeStreak, streak, bestStreak);
+    if (peak > bestStreak) {
+      setBestStreak(peak);
+      void saveBestStreak(peak);
+    }
+  }, [allTimeStreak, streak, bestStreak]);
   const didPracticeToday = chapterRule ? hasChapterClipToday(clips, chapterRule, effectiveNow) : false;
   const protocolConsistency = useMemo(
     () =>
@@ -413,6 +427,7 @@ export function useProgressState({
     revealTrackClips,
     dayCount,
     streak,
+    bestStreak,
     didPracticeToday,
     protocolConsistency,
     heatmapCells,

@@ -44,8 +44,24 @@ const colors = {
   tabTextActive: "#f5f2ea"
 };
 
+const darkColors = {
+  bgStart: "#0f0f0f",
+  bgMid: "#0a0a0a",
+  bgEnd: "#050505",
+  textPrimary: "#f6f1e8",
+  textSecondary: "#a89f92",
+  glassBorder: "rgba(255,255,255,0.08)",
+  glassFillTop: "rgba(28,28,28,0.95)",
+  glassFillBottom: "rgba(18,18,18,0.92)",
+  cardBg: "rgba(24,22,20,0.9)",
+  cardBorder: "rgba(255,255,255,0.06)",
+  tabBg: "rgba(20,20,20,0.96)",
+  tabBorder: "rgba(255,255,255,0.06)",
+};
+
 const gradients = {
   appBackground: ["#f4efe6", "#ebe5da", "#e1d7c8"] as [string, string, string],
+  appBackgroundDark: ["#0f0f0f", "#0a0a0a", "#050505"] as [string, string, string],
   primaryAction: ["#ff8b2b", "#ff5a1f", "#d93000"] as [string, string, string],
   tabIndicator: ["#ff5a1f", "#ea3d00"] as [string, string],
   topControl: ["rgba(31,31,31,0.96)", "rgba(4,4,4,0.96)"] as [string, string],
@@ -55,7 +71,9 @@ const gradients = {
   heroSurfaceReveal: ["rgba(246,241,232,0.99)", "rgba(234,225,211,0.97)"] as [string, string],
   intelCard: ["rgba(246,241,232,0.99)", "rgba(235,227,214,0.97)"] as [string, string],
   calendarHero: ["rgba(246,241,232,0.99)", "rgba(233,224,210,0.97)"] as [string, string],
-  calendarHeroScene: ["rgba(246,241,232,0.99)", "rgba(232,223,208,0.98)"] as [string, string]
+  calendarHeroScene: ["rgba(246,241,232,0.99)", "rgba(232,223,208,0.98)"] as [string, string],
+  heroSurfaceDark: ["rgba(28,26,24,0.98)", "rgba(20,18,16,0.96)"] as [string, string],
+  intelCardDark: ["rgba(28,26,24,0.98)", "rgba(22,20,18,0.96)"] as [string, string],
 };
 
 const shape = {
@@ -84,6 +102,7 @@ const decor = {
 export const theme = {
   visualDirection: "modern" as const,
   colors,
+  darkColors,
   gradients,
   shape,
   decor,

@@ -46,6 +46,8 @@ export type ManageScreenProps = {
   hapticsMode: HapticsMode;
   onHapticsModeChange: (next: HapticsMode) => void;
   onDeleteAccount: () => Promise<void>;
+  darkMode: boolean;
+  onDarkModeChange: (next: boolean) => void;
 };
 
 export function ManageScreen({
@@ -71,6 +73,8 @@ export function ManageScreen({
   hapticsMode,
   onHapticsModeChange,
   onDeleteAccount,
+  darkMode,
+  onDarkModeChange,
 }: ManageScreenProps) {
   const insets = useSafeAreaInsets();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -116,36 +120,36 @@ export function ManageScreen({
         <View style={styles.header}>
           <View>
             <View style={styles.headerRail} />
-            <Text style={styles.title}>manage</Text>
+            <Text style={[styles.title, darkMode ? { color: theme.darkColors.textPrimary } : null]}>manage</Text>
           </View>
           <TactilePressable
-            style={styles.settingsButton}
+            style={[styles.settingsButton, darkMode && { borderColor: "rgba(255,255,255,0.1)" }]}
             onPress={() => {
               triggerSelectionHaptic();
               setSettingsOpen(true);
             }}
           >
             <LinearGradient
-              colors={theme.gradients.topControlGhost}
+              colors={darkMode ? ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.03)"] as [string, string] : theme.gradients.topControlGhost}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <Text style={styles.settingsButtonText}>settings</Text>
+            <Text style={[styles.settingsButtonText, darkMode && { color: theme.darkColors.textSecondary }]}>settings</Text>
           </TactilePressable>
         </View>
 
         {/* Journey cards */}
         {journeys.length === 0 && !showCreateForm ? (
-          <View style={styles.emptyCard}>
+          <View style={[styles.emptyCard, darkMode && { borderColor: theme.darkColors.cardBorder }]}>
             <LinearGradient
-              colors={theme.gradients.heroSurface}
+              colors={darkMode ? theme.gradients.intelCardDark : theme.gradients.heroSurface}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <Text style={styles.emptyTitle}>no journeys yet</Text>
-            <Text style={styles.emptyBody}>tap below to start tracking your first skill.</Text>
+            <Text style={[styles.emptyTitle, darkMode && { color: theme.darkColors.textPrimary }]}>no journeys yet</Text>
+            <Text style={[styles.emptyBody, darkMode && { color: theme.darkColors.textSecondary }]}>tap below to start tracking your first skill.</Text>
           </View>
         ) : null}
 
@@ -163,9 +167,9 @@ export function ManageScreen({
           const modeEmoji = journey.captureMode === "photo" ? "\uD83D\uDCF7" : "\uD83C\uDFA5";
 
           return (
-            <View key={journey.id} style={styles.card}>
+            <View key={journey.id} style={[styles.card, darkMode ? { borderColor: theme.darkColors.cardBorder } : null]}>
               <LinearGradient
-                colors={isActive ? ["rgba(255,90,31,0.08)", "rgba(255,90,31,0.03)"] : theme.gradients.heroSurface}
+                colors={darkMode ? theme.gradients.intelCardDark : isActive ? ["rgba(255,90,31,0.08)", "rgba(255,90,31,0.03)"] : theme.gradients.heroSurface}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
@@ -178,48 +182,48 @@ export function ManageScreen({
                   {isActive ? (
                     <Text style={styles.cardKicker}>active journey</Text>
                   ) : null}
-                  <Text style={styles.cardTitle} numberOfLines={2}>{journey.title.toLowerCase()}</Text>
+                  <Text style={[styles.cardTitle, darkMode ? { color: theme.darkColors.textPrimary } : null]} numberOfLines={2}>{journey.title.toLowerCase()}</Text>
                 </View>
                 <Text style={styles.modeEmoji}>{modeEmoji}</Text>
               </View>
 
               {/* Stats row */}
-              <View style={styles.statsRow}>
+              <View style={[styles.statsRow, darkMode && { backgroundColor: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.06)" }]}>
                 <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{Math.max(dayCount, 1)}</Text>
-                  <Text style={styles.statLabel}>day</Text>
+                  <Text style={[styles.statValue, darkMode && { color: theme.darkColors.textPrimary }]}>{Math.max(dayCount, 1)}</Text>
+                  <Text style={[styles.statLabel, darkMode && { color: theme.darkColors.textSecondary }]}>day</Text>
                 </View>
-                <View style={styles.statDivider} />
+                <View style={[styles.statDivider, darkMode && { backgroundColor: "rgba(255,255,255,0.1)" }]} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, streak >= 7 ? styles.statValueHot : undefined]}>
+                  <Text style={[styles.statValue, streak >= 7 ? styles.statValueHot : undefined, darkMode && streak < 7 && { color: theme.darkColors.textPrimary }]}>
                     {streak}
                   </Text>
-                  <Text style={styles.statLabel}>streak</Text>
+                  <Text style={[styles.statLabel, darkMode && { color: theme.darkColors.textSecondary }]}>streak</Text>
                 </View>
-                <View style={styles.statDivider} />
+                <View style={[styles.statDivider, darkMode && { backgroundColor: "rgba(255,255,255,0.1)" }]} />
                 <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{journey.milestoneLengthDays}d</Text>
-                  <Text style={styles.statLabel}>chapter</Text>
+                  <Text style={[styles.statValue, darkMode && { color: theme.darkColors.textPrimary }]}>{journey.milestoneLengthDays}d</Text>
+                  <Text style={[styles.statLabel, darkMode && { color: theme.darkColors.textSecondary }]}>chapter</Text>
                 </View>
               </View>
 
               {isEditing ? (
                 <View style={styles.editForm}>
                   <View style={styles.editSection}>
-                    <Text style={styles.fieldLabel}>title</Text>
+                    <Text style={[styles.fieldLabel, darkMode && { color: theme.darkColors.textSecondary }]}>title</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, darkMode && { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.08)", color: theme.darkColors.textPrimary }]}
                       value={editTitle}
                       onChangeText={setEditTitle}
                       editable={!editSaving}
-                      placeholderTextColor="rgba(0,0,0,0.25)"
+                      placeholderTextColor={darkMode ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"}
                       autoFocus
                       autoCapitalize="none"
                       maxLength={120}
                     />
                   </View>
                   <View style={styles.editSection}>
-                    <Text style={styles.fieldLabel}>chapter length</Text>
+                    <Text style={[styles.fieldLabel, darkMode && { color: theme.darkColors.textSecondary }]}>chapter length</Text>
                     <View style={styles.chipRow}>
                       {[7, 14, 30, 100].map((length) => {
                         const selected = editMilestoneLengthDays === length;
@@ -312,7 +316,7 @@ export function ManageScreen({
                     </TactilePressable>
                   ) : null}
                   <TactilePressable
-                    style={[styles.actionButtonGhost, isBusy ? styles.buttonDisabled : undefined]}
+                    style={[styles.actionButtonGhost, darkMode && { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.1)" }, isBusy ? styles.buttonDisabled : undefined]}
                     onPress={() => {
                       triggerSelectionHaptic();
                       setEditingId(journey.id);
@@ -321,10 +325,10 @@ export function ManageScreen({
                     }}
                     disabled={isBusy}
                   >
-                    <Text style={styles.actionButtonTextGhost}>edit</Text>
+                    <Text style={[styles.actionButtonTextGhost, darkMode && { color: theme.darkColors.textSecondary }]}>edit</Text>
                   </TactilePressable>
                   <TactilePressable
-                    style={[styles.actionButtonDanger, isBusy ? styles.buttonDisabled : undefined]}
+                    style={[styles.actionButtonDanger, darkMode && { backgroundColor: "rgba(203,31,31,0.12)", borderColor: "rgba(203,31,31,0.2)" }, isBusy ? styles.buttonDisabled : undefined]}
                     onPress={() => {
                       triggerSelectionHaptic();
                       Alert.alert(
@@ -352,27 +356,27 @@ export function ManageScreen({
 
         {/* Create journey */}
         {showCreateForm ? (
-          <View style={styles.card}>
+          <View style={[styles.card, darkMode && { borderColor: theme.darkColors.cardBorder }]}>
             <LinearGradient
-              colors={theme.gradients.heroSurface}
+              colors={darkMode ? theme.gradients.intelCardDark : theme.gradients.heroSurface}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
             />
             <View style={styles.createFormHeader}>
               <View style={styles.headerRail} />
-              <Text style={styles.createFormTitle}>new journey</Text>
+              <Text style={[styles.createFormTitle, darkMode && { color: theme.darkColors.textPrimary }]}>new journey</Text>
             </View>
 
             <View style={styles.editSection}>
-              <Text style={styles.fieldLabel}>what are you practicing?</Text>
+              <Text style={[styles.fieldLabel, darkMode && { color: theme.darkColors.textSecondary }]}>what are you practicing?</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, darkMode && { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.08)", color: theme.darkColors.textPrimary }]}
                 placeholder="e.g., learning piano"
                 value={newTitle}
                 onChangeText={setNewTitle}
                 editable={!creating}
-                placeholderTextColor="rgba(0,0,0,0.25)"
+                placeholderTextColor={darkMode ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)"}
                 autoFocus
                 autoCapitalize="none"
                 maxLength={120}
@@ -380,7 +384,7 @@ export function ManageScreen({
             </View>
 
             <View style={styles.editSection}>
-              <Text style={styles.fieldLabel}>capture mode</Text>
+              <Text style={[styles.fieldLabel, darkMode && { color: theme.darkColors.textSecondary }]}>capture mode</Text>
               <View style={styles.chipRow}>
                 {([
                   { key: "video" as const, label: "\uD83C\uDFA5 video" },
@@ -390,13 +394,13 @@ export function ManageScreen({
                   return (
                     <TactilePressable
                       key={option.key}
-                      style={[styles.chip, selected ? styles.chipSelected : undefined]}
+                      style={[styles.chip, darkMode && !selected && { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.08)" }, selected ? styles.chipSelected : undefined]}
                       onPress={() => {
                         triggerSelectionHaptic();
                         setNewCaptureMode(option.key);
                       }}
                     >
-                      <Text style={[styles.chipText, selected ? styles.chipTextSelected : undefined]}>{option.label}</Text>
+                      <Text style={[styles.chipText, darkMode && !selected && { color: theme.darkColors.textSecondary }, selected ? styles.chipTextSelected : undefined]}>{option.label}</Text>
                     </TactilePressable>
                   );
                 })}
@@ -404,7 +408,7 @@ export function ManageScreen({
             </View>
 
             <View style={styles.editSection}>
-              <Text style={styles.fieldLabel}>first chapter length</Text>
+              <Text style={[styles.fieldLabel, darkMode && { color: theme.darkColors.textSecondary }]}>first chapter length</Text>
               <View style={styles.chipRow}>
                 {[7, 14, 30, 100].map((length) => {
                   const selected = newMilestoneLengthDays === length;
@@ -460,20 +464,20 @@ export function ManageScreen({
           </View>
         ) : (
           <TactilePressable
-            style={styles.newJourneyButton}
+            style={[styles.newJourneyButton, darkMode && { borderColor: "rgba(255,255,255,0.06)" }]}
             onPress={() => {
               triggerSelectionHaptic();
               setShowCreateForm(true);
             }}
           >
             <LinearGradient
-              colors={theme.gradients.heroSurface}
+              colors={darkMode ? theme.gradients.intelCardDark : theme.gradients.heroSurface}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
             />
             <Text style={styles.newJourneyPlus}>+</Text>
-            <Text style={styles.newJourneyText}>new journey</Text>
+            <Text style={[styles.newJourneyText, darkMode && { color: theme.darkColors.textSecondary }]}>new journey</Text>
           </TactilePressable>
         )}
       </ScrollView>
@@ -482,13 +486,13 @@ export function ManageScreen({
       <Modal visible={settingsOpen} animationType="slide" transparent onRequestClose={() => setSettingsOpen(false)}>
         <View style={styles.settingsBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setSettingsOpen(false)} />
-          <View style={[styles.settingsSheet, { paddingBottom: Math.max(18, insets.bottom + 10) }]}>
+          <View style={[styles.settingsSheet, { paddingBottom: Math.max(18, insets.bottom + 10) }, darkMode ? { backgroundColor: "rgba(20,18,16,0.98)", borderColor: "rgba(255,255,255,0.08)" } : null]}>
             <View style={styles.settingsCloseRow}>
-              <TactilePressable style={styles.settingsCloseButton} onPress={() => {
+              <TactilePressable style={[styles.settingsCloseButton, darkMode && { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)" }]} onPress={() => {
                 triggerSelectionHaptic();
                 setSettingsOpen(false);
               }}>
-                <Text style={styles.settingsCloseText}>done</Text>
+                <Text style={[styles.settingsCloseText, darkMode && { color: theme.darkColors.textSecondary }]}>done</Text>
               </TactilePressable>
             </View>
             <SettingsScreen
@@ -505,6 +509,8 @@ export function ManageScreen({
               hapticsMode={hapticsMode}
               onHapticsModeChange={onHapticsModeChange}
               onDeleteAccount={onDeleteAccount}
+              darkMode={darkMode}
+              onDarkModeChange={onDarkModeChange}
             />
           </View>
         </View>

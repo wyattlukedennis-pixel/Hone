@@ -247,6 +247,26 @@ export function getUnlockedMilestone(dayCount: number) {
   return milestoneDefinitions.find((milestone) => milestone.day === dayCount) ?? null;
 }
 
+export function getLongestStreak(clips: Clip[]) {
+  const days = uniquePracticeDays(clips);
+  if (days.size === 0) return 0;
+  const sorted = [...days].sort();
+  let best = 1;
+  let run = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(sorted[i - 1] + "T00:00:00");
+    const curr = new Date(sorted[i] + "T00:00:00");
+    const diffMs = curr.getTime() - prev.getTime();
+    if (diffMs === 86400000) {
+      run += 1;
+      if (run > best) best = run;
+    } else {
+      run = 1;
+    }
+  }
+  return best;
+}
+
 export function getCurrentStreak(clips: Clip[], now = new Date()) {
   const days = uniquePracticeDays(clips);
   const cursor = new Date(now);

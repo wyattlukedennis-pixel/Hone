@@ -88,6 +88,7 @@ type JourneysScreenProps = {
   onRecordingsRevisionBump?: () => void;
   onMediaModeChange?: (mode: "video" | "photo") => void;
   onJourneysLoaded?: (data: { journeys: Journey[]; clipsByJourney: Record<string, Clip[]>; updatingId: string | null }) => void;
+  darkMode?: boolean;
 };
 
 export function JourneysScreen({
@@ -106,7 +107,8 @@ export function JourneysScreen({
   recordingsRevision,
   onRecordingsRevisionBump,
   onMediaModeChange,
-  onJourneysLoaded
+  onJourneysLoaded,
+  darkMode = false
 }: JourneysScreenProps) {
   const reducedMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
@@ -594,11 +596,13 @@ export function JourneysScreen({
                 ) : null}
                 <LinearGradient
                   colors={
-                    latestClipThumbnail
-                      ? ["rgba(244,239,230,0.82)", "rgba(235,227,214,0.88)"]
-                      : revealFocusMode
-                        ? theme.gradients.heroSurfaceReveal
-                        : theme.gradients.heroSurface
+                    darkMode
+                      ? theme.gradients.heroSurfaceDark
+                      : latestClipThumbnail
+                        ? ["rgba(244,239,230,0.82)", "rgba(235,227,214,0.88)"]
+                        : revealFocusMode
+                          ? theme.gradients.heroSurfaceReveal
+                          : theme.gradients.heroSurface
                   }
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
@@ -606,7 +610,7 @@ export function JourneysScreen({
                 />
                 <View style={[styles.skillHeader, revealFocusMode ? styles.skillHeaderRevealFocus : undefined]}>
                   <View style={styles.skillHeaderRail} />
-                  <Text style={[styles.sceneKicker, revealFocusMode ? styles.sceneKickerRevealFocus : undefined]}>
+                  <Text style={[styles.sceneKicker, revealFocusMode ? styles.sceneKickerRevealFocus : undefined, darkMode ? styles.darkTextSecondary : null]}>
                     {`chapter ${chapterNumber}`}
                   </Text>
                   <View style={styles.skillHeaderTop}>
@@ -615,7 +619,8 @@ export function JourneysScreen({
                         styles.skillName,
                         compactMode ? styles.skillNameCompact : undefined,
                         tightMode ? styles.skillNameTight : undefined,
-                        { fontSize: skillNameSize, lineHeight: Math.round(skillNameSize * 1.15) }
+                        { fontSize: skillNameSize, lineHeight: Math.round(skillNameSize * 1.15) },
+                        darkMode ? styles.darkTextPrimary : null
                       ]}
                       numberOfLines={2}
                     >
@@ -797,7 +802,7 @@ export function JourneysScreen({
             ) : null}
             {chapterRevealReady ? (
               <View style={styles.protocolCard}>
-                <Text style={styles.protocolStatus}>chapter done. reveal's ready.</Text>
+                <Text style={[styles.protocolStatus, darkMode && styles.darkTextPrimary]}>chapter done. reveal's ready.</Text>
               </View>
             ) : null}
             {activeJourney && (<Animated.View style={[styles.sceneCalendarWrap, {
@@ -816,6 +821,7 @@ export function JourneysScreen({
                 hero
                 fill={false}
                 scene
+                darkMode={darkMode}
                 captureMode={activeJourney.captureMode}
                 milestoneLengthDays={chapterTargetDays}
                 milestoneProgressDays={chapterProgressDays}
@@ -1710,5 +1716,15 @@ const styles = StyleSheet.create({
   saveFlightVideo: {
     width: "100%",
     height: "100%"
+  },
+  darkTextPrimary: {
+    color: theme.darkColors.textPrimary
+  },
+  darkTextSecondary: {
+    color: theme.darkColors.textSecondary
+  },
+  darkCard: {
+    backgroundColor: theme.darkColors.cardBg,
+    borderColor: theme.darkColors.cardBorder
   }
 });

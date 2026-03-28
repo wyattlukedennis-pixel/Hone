@@ -32,6 +32,7 @@ import { clearAuthToken, readAuthToken, saveAuthToken } from "./storage/authStor
 import { getPendingClipUploadCount, processClipUploadQueue } from "./storage/clipUploadQueue";
 import { readDailyMomentSettings, saveDailyMomentSettings } from "./storage/dailyMomentStorage";
 import { readDevDateShiftSettings, saveDevDateShiftSettings } from "./storage/devToolsStorage";
+import { readDarkMode, saveDarkMode } from "./storage/darkModeStorage";
 import { readHapticsMode, saveHapticsMode } from "./storage/hapticsStorage";
 import { theme } from "./theme";
 import type { AuthMode, User } from "./types/auth";
@@ -91,6 +92,7 @@ export default function App() {
   const [devDateShiftSettings, setDevDateShiftSettings] = useState<DevDateShiftSettings>(defaultDevDateShiftSettings);
   const [dailyMomentSettings, setDailyMomentSettings] = useState<DailyMomentSettings>(defaultDailyMomentSettings);
   const [hapticsMode, setHapticsMode] = useState<HapticsMode>(defaultHapticsMode);
+  const [darkMode, setDarkMode] = useState(false);
   const [openRecorderSignal, setOpenRecorderSignal] = useState(0);
   const [manageJourneys, setManageJourneys] = useState<Journey[]>([]);
   const [manageClipsByJourney, setManageClipsByJourney] = useState<Record<string, Clip[]>>({});
@@ -116,20 +118,22 @@ export default function App() {
     trackEvent("app_opened", { appEnv: env.appEnv });
     async function bootstrapAuth() {
       try {
-        const [token, storedJourneyId, storedDevDateShift, storedDailyMoment, storedHapticsMode, , storedOnboardingDone] = await Promise.all([
+        const [token, storedJourneyId, storedDevDateShift, storedDailyMoment, storedHapticsMode, , storedOnboardingDone, storedDarkMode] = await Promise.all([
           readAuthToken(),
           readActiveJourneyId(),
           __DEV__ ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings),
           readDailyMomentSettings(),
           readHapticsMode(),
           initPurchases(),
-          readOnboardingComplete()
+          readOnboardingComplete(),
+          readDarkMode()
         ]);
         if (storedJourneyId) setActiveJourneyId(storedJourneyId);
         if (__DEV__) setDevDateShiftSettings(storedDevDateShift);
         setDailyMomentSettings(storedDailyMoment);
         setHapticsMode(storedHapticsMode);
         applyHapticsMode(storedHapticsMode);
+        setDarkMode(storedDarkMode);
         setOnboardingDone(storedOnboardingDone);
         if (!token) return;
 
@@ -493,6 +497,7 @@ export default function App() {
           recordingsRevision={recordingsRevision}
           onRecordingsRevisionBump={() => setRecordingsRevision((v) => v + 1)}
           onMediaModeChange={setMediaMode}
+          darkMode={darkMode}
           onJourneysLoaded={({ journeys, clipsByJourney, updatingId }) => {
             const deletes = manageLocalDeletesRef.current;
             const edits = manageLocalEditsRef.current;
@@ -538,7 +543,8 @@ export default function App() {
     openRecorderSignal,
     deepLinkRecorderSignal,
     deepLinkRecorderJourneyId,
-    recordingsRevision
+    recordingsRevision,
+    darkMode
   ]);
 
   const progressContent = useMemo(() => {
@@ -567,6 +573,7 @@ export default function App() {
           progressEntrySignal={progressEntrySignal}
           recordingsRevision={recordingsRevision}
           onFullscreenChange={setProgressFullscreen}
+          darkMode={darkMode}
         />
       ) : null;
   }, [
@@ -575,7 +582,8 @@ export default function App() {
     mediaMode,
     openRevealSignal,
     progressEntrySignal,
-    recordingsRevision
+    recordingsRevision,
+    darkMode
   ]);
 
   const settingsContent = useMemo(() => {
@@ -657,6 +665,11 @@ export default function App() {
           void handleHapticsModeChange(next);
         }}
         onDeleteAccount={handleDeleteAccount}
+        darkMode={darkMode}
+        onDarkModeChange={(next) => {
+          setDarkMode(next);
+          void saveDarkMode(next);
+        }}
       />
     ) : null;
   }, [
@@ -669,20 +682,21 @@ export default function App() {
     logoutLoading,
     devDateShiftSettings,
     dailyMomentSettings,
-    hapticsMode
+    hapticsMode,
+    darkMode
   ]);
 
   return (
     <SafeAreaProvider>
-      <LinearGradient colors={theme.gradients.appBackground} style={styles.app}>
-        <BackgroundOrbs />
+      <LinearGradient colors={darkMode ? theme.gradients.appBackgroundDark : theme.gradients.appBackground} style={styles.app}>
+        {!darkMode ? <BackgroundOrbs /> : null}
         {isBootstrapping ? (
           <SafeAreaView style={styles.safeArea}>
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={theme.colors.accentStrong} />
               <Text style={styles.loadingText}>loading hone...</Text>
             </View>
-            <StatusBar style="dark" />
+            <StatusBar style={darkMode ? "light" : "dark"} />
           </SafeAreaView>
         ) : (
           <SafeAreaView style={styles.safeArea}>
@@ -751,8 +765,8 @@ export default function App() {
                 />
               )}
             </Animated.View>
-            {session && !progressFullscreen ? <TabBar activeTab={tab} onSelect={setTab} /> : null}
-            <StatusBar style="dark" />
+            {session && !progressFullscreen ? <TabBar activeTab={tab} onSelect={setTab} darkMode={darkMode} /> : null}
+            <StatusBar style={darkMode ? "light" : "dark"} />
           </SafeAreaView>
         )}
       </LinearGradient>

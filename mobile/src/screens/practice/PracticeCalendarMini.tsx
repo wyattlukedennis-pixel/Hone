@@ -22,6 +22,7 @@ type PracticeCalendarMiniProps = {
   revealReady?: boolean;
   saveSignal?: number;
   onReRecordToday?: () => void;
+  darkMode?: boolean;
 };
 
 function toLocalDayKey(value: Date) {
@@ -51,7 +52,8 @@ export function PracticeCalendarMini({
   milestoneProgressDays = 0,
   revealReady = false,
   saveSignal = 0,
-  onReRecordToday
+  onReRecordToday,
+  darkMode = false
 }: PracticeCalendarMiniProps) {
   const insets = useSafeAreaInsets();
   const currentMonthStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
@@ -259,7 +261,7 @@ export function PracticeCalendarMini({
       >
         {hero ? (
           <LinearGradient
-            colors={sceneMode ? theme.gradients.calendarHeroScene : theme.gradients.calendarHero}
+            colors={darkMode ? theme.gradients.intelCardDark : sceneMode ? theme.gradients.calendarHeroScene : theme.gradients.calendarHero}
             style={[
               styles.heroGradient,
               fill ? styles.heroGradientFill : undefined,
@@ -278,7 +280,8 @@ export function PracticeCalendarMini({
                   style={[
                     styles.heroTitle,
                     sceneMode ? styles.heroTitleScene : undefined,
-                    { fontSize: heroMonthTitleSize, lineHeight: heroMonthTitleLineHeight }
+                    { fontSize: heroMonthTitleSize, lineHeight: heroMonthTitleLineHeight },
+                    darkMode ? { color: theme.darkColors.textPrimary } : null
                   ]}
                 >
                   {monthLabel}
@@ -345,7 +348,7 @@ export function PracticeCalendarMini({
             <Animated.View style={{ opacity: monthFade, transform: [{ translateX: monthTranslate }] }}>
               <View style={[styles.weekdayRow, fill ? styles.weekdayRowFill : undefined, sceneMode ? styles.weekdayRowScene : undefined]}>
                 {weekdayLabels.map((label, index) => (
-                  <Text key={`${label}-${index}`} style={[styles.weekdayLabel, sceneMode ? styles.weekdayLabelScene : undefined, { width: heroCellSize }]}>
+                  <Text key={`${label}-${index}`} style={[styles.weekdayLabel, sceneMode ? styles.weekdayLabelScene : undefined, { width: heroCellSize }, darkMode ? { color: theme.darkColors.textSecondary } : null]}>
                     {label}
                   </Text>
                 ))}
@@ -362,6 +365,7 @@ export function PracticeCalendarMini({
                             style={[
                               styles.cellHeroGhost,
                               sceneMode ? styles.cellHeroGhostScene : undefined,
+                              darkMode ? { borderColor: "rgba(255,255,255,0.06)", backgroundColor: "rgba(30,28,26,0.5)" } : null,
                               {
                                 width: heroCellSize,
                                 height: heroCellSize,
@@ -402,6 +406,7 @@ export function PracticeCalendarMini({
                             !practiced && sceneMode ? styles.cellEmptyHeroScene : undefined,
                             practiced && !hasPhoto && sceneMode ? styles.cellDoneHeroScene : undefined,
                             practiced && hasPhoto && sceneMode ? styles.cellDoneHeroPhotoScene : undefined,
+                            !practiced && darkMode ? { borderColor: "rgba(255,255,255,0.1)", backgroundColor: "rgba(40,38,35,0.8)" } : null,
                             isRevealDay ? styles.cellRevealHero : undefined,
                             isRevealDay && sceneMode ? styles.cellRevealHeroScene : undefined,
                             isToday ? styles.cellTodayHero : undefined,
@@ -415,7 +420,8 @@ export function PracticeCalendarMini({
                               sceneMode ? styles.cellDayTextScene : undefined,
                               practiced ? styles.cellDayTextDone : undefined,
                               practiced && sceneMode ? styles.cellDayTextDoneScene : undefined,
-                              isRevealDay ? styles.cellDayTextReveal : undefined
+                              isRevealDay ? styles.cellDayTextReveal : undefined,
+                              !practiced && darkMode ? { color: theme.darkColors.textSecondary } : null
                             ]}
                           >
                             {cell.day}

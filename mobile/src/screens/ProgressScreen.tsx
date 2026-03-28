@@ -18,6 +18,7 @@ import { hasRevealExportPurchase } from "../utils/purchases";
 import { prepareReelAsset } from "../utils/reelExport";
 import { buildRevealComparisonPlanFromRange, buildRevealStoryline } from "../utils/progress";
 import { buildTimelapseClips } from "../utils/reelBuilder";
+import type { Clip } from "../types/clip";
 import { useReducedMotion } from "../utils/useReducedMotion";
 import ChapterRevealScreen from "./progress/ChapterRevealScreen";
 import ReelPreviewScreen from "./progress/ReelPreviewScreen";
@@ -36,6 +37,7 @@ type ProgressScreenProps = {
   progressEntrySignal?: number;
   recordingsRevision: number;
   onFullscreenChange?: (fullscreen: boolean) => void;
+  darkMode?: boolean;
 };
 
 type RevealSourceRect = {
@@ -70,7 +72,8 @@ export function ProgressScreen({
   openRevealSignal = 0,
   progressEntrySignal = 0,
   recordingsRevision,
-  onFullscreenChange
+  onFullscreenChange,
+  darkMode = false
 }: ProgressScreenProps) {
   const { height } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
@@ -81,7 +84,6 @@ export function ProgressScreen({
   const [chapterActionMessage, setChapterActionMessage] = useState<string | null>(null);
   const [chapterRevealOpen, setChapterRevealOpen] = useState(false);
   const [selectedPastReveal, setSelectedPastReveal] = useState<JourneyReveal | null>(null);
-  const [pastRevealModalOpen, setPastRevealModalOpen] = useState(false);
   const [chapterHistoryOpen, setChapterHistoryOpen] = useState(false);
   const [historyPaywallVisible, setHistoryPaywallVisible] = useState(false);
   const [pendingPaywallReveal, setPendingPaywallReveal] = useState<{ reveal: JourneyReveal; source: "history_row" | "history_picker" } | null>(null);
@@ -108,17 +110,14 @@ export function ProgressScreen({
   const progressTakeover = useRef(new Animated.Value(0)).current;
   const replayOpenStatusReveal = useRef(new Animated.Value(0)).current;
   const replayOpenStatusPulse = useRef(new Animated.Value(0)).current;
-  const pastModalBackdropReveal = useRef(new Animated.Value(0)).current;
-  const pastModalCardReveal = useRef(new Animated.Value(0)).current;
-  const pastThenPanelReveal = useRef(new Animated.Value(0)).current;
-  const pastNowPanelReveal = useRef(new Animated.Value(0)).current;
-  const pastLabelsReveal = useRef(new Animated.Value(0)).current;
+  const streakFlamePulse = useRef(new Animated.Value(0)).current;
   const pastRevealOpenCooldownUntilRef = useRef(0);
   const journeyFinaleUnlockHandledJourneyRef = useRef<string | null>(null);
   const quickReelPrewarmKeyRef = useRef<string | null>(null);
   const [reelPreviewVisible, setReelPreviewVisible] = useState(false);
   const [reelMode, setReelMode] = useState<"video" | "timelapse">("video");
   const [timelapsePhotos, setTimelapsePhotos] = useState<Array<{ uri: string; label: string }>>([]);
+  const [timelapseClipObjects, setTimelapseClipObjects] = useState<Clip[]>([]);
   const [composedDaySpan, setComposedDaySpan] = useState(0);
 
   // Notify parent when fullscreen overlay is active (hides tab bar)
@@ -148,7 +147,11 @@ export function ProgressScreen({
     revealTrackClips,
     dayCount,
     streak,
-    didPracticeToday
+    bestStreak,
+    didPracticeToday,
+    heatmapCells,
+    protocolConsistency,
+    showHeatmap
   } = useProgressState({
     token,
     activeJourneyId,
@@ -179,9 +182,9 @@ export function ProgressScreen({
     setReelPreviewVisible(false);
     setReelMode("video");
     setTimelapsePhotos([]);
+    setTimelapseClipObjects([]);
     setComposedDaySpan(0);
     setSelectedPastReveal(null);
-    setPastRevealModalOpen(false);
     setChapterHistoryOpen(false);
   }, [selectedJourney?.id, finaleUnlockPulse]);
 
@@ -203,10 +206,6 @@ export function ProgressScreen({
     return plans;
   }, [reveals, selectedJourney?.id, selectedJourney?.captureMode, revealTrackClips]);
 
-  const pastRevealComparisonPlan = useMemo(
-    () => (selectedPastReveal ? revealReplayPlans[selectedPastReveal.id] ?? null : null),
-    [selectedPastReveal?.id, revealReplayPlans]
-  );
   const revealStorylines = useMemo(() => {
     const stories: Record<string, ReturnType<typeof buildRevealStoryline>> = {};
     for (const reveal of reveals) {
@@ -299,87 +298,6 @@ export function ProgressScreen({
     [chapterHistoryOpen, closeChapterHistoryModal, historyModalDragY, reducedMotion]
   );
 
-  useEffect(() => {
-    if (!pastRevealModalOpen) {
-      pastModalBackdropReveal.setValue(0);
-      pastModalCardReveal.setValue(0);
-      pastThenPanelReveal.setValue(0);
-      pastNowPanelReveal.setValue(0);
-      pastLabelsReveal.setValue(0);
-      return;
-    }
-
-    if (reducedMotion) {
-      pastModalBackdropReveal.setValue(1);
-      pastModalCardReveal.setValue(1);
-      pastThenPanelReveal.setValue(1);
-      pastNowPanelReveal.setValue(1);
-      pastLabelsReveal.setValue(1);
-      return;
-    }
-
-    pastModalBackdropReveal.setValue(0);
-    pastModalCardReveal.setValue(0);
-    pastThenPanelReveal.setValue(0);
-    pastNowPanelReveal.setValue(0);
-    pastLabelsReveal.setValue(0);
-
-    Animated.sequence([
-      Animated.parallel([
-        Animated.timing(pastModalBackdropReveal, {
-          toValue: 1,
-          duration: duration(theme.motion.transitionMs - 40),
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true
-        }),
-        Animated.timing(pastModalCardReveal, {
-          toValue: 1,
-          duration: duration(theme.motion.transitionMs),
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true
-        })
-      ]),
-      Animated.parallel([
-        Animated.timing(pastThenPanelReveal, {
-          toValue: 1,
-          duration: duration(theme.motion.microMs - 10),
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true
-        }),
-        Animated.sequence([
-          Animated.delay(duration(36)),
-          Animated.timing(pastLabelsReveal, {
-            toValue: 1,
-            duration: duration(theme.motion.microMs - 10),
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true
-          })
-        ])
-      ]),
-      Animated.timing(pastNowPanelReveal, {
-        toValue: 1,
-        duration: duration(theme.motion.microMs + 30),
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true
-      })
-    ]).start();
-  }, [
-    pastRevealModalOpen,
-    reducedMotion,
-    pastModalBackdropReveal,
-    pastModalCardReveal,
-    pastThenPanelReveal,
-    pastNowPanelReveal,
-    pastLabelsReveal
-  ]);
-
-  useEffect(() => {
-    if (!pastRevealModalOpen) return;
-    if (pastRevealComparisonPlan) return;
-    setPastRevealModalOpen(false);
-    setSelectedPastReveal(null);
-    setChapterActionMessage("could not build a replay cut for that chapter yet.");
-  }, [pastRevealModalOpen, pastRevealComparisonPlan]);
 
   useEffect(() => {
     if (!chapterHistoryOpen) {
@@ -460,6 +378,20 @@ export function ProgressScreen({
       historyModalDragY.stopAnimation();
     };
   }, [historyModalDragY]);
+
+  useEffect(() => {
+    if (streak >= 3 && !reducedMotion) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(streakFlamePulse, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(streakFlamePulse, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    streakFlamePulse.setValue(0);
+  }, [streak >= 3, reducedMotion, streakFlamePulse]);
 
   const activeComparison = comparison;
   const activePresetLabel = "chapter reveal";
@@ -757,6 +689,7 @@ export function ProgressScreen({
           const clips = await buildTimelapseClips(token, selectedJourney.id);
           if (clips.length > 0) {
             setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+            setTimelapseClipObjects(clips.map(c => c.clip));
             setReelMode("timelapse");
             setComposedDaySpan(clips.length);
             setReelPreviewVisible(true);
@@ -853,12 +786,6 @@ export function ProgressScreen({
       }, 900);
       return;
     }
-    const replayPlan = revealReplayPlans[reveal.id] ?? null;
-    if (!replayPlan) {
-      setChapterActionMessage("replay cut unavailable for this chapter yet.");
-      closeChapterHistoryModal();
-      return;
-    }
     setReplayOpenStatusMessage(null);
     if (replayOpenStatusTimerRef.current) {
       clearTimeout(replayOpenStatusTimerRef.current);
@@ -866,8 +793,25 @@ export function ProgressScreen({
     }
     pastRevealOpenCooldownUntilRef.current = now + 500;
     setSelectedPastReveal(reveal);
-    setPastRevealModalOpen(true);
     closeChapterHistoryModal();
+
+    // Open the standard chapter reveal screen for replay
+    if (selectedJourney?.captureMode === "photo") {
+      // Photo mode: open timelapse preview
+      (async () => {
+        const clips = await buildTimelapseClips(token, selectedJourney.id);
+        if (clips.length > 0) {
+          setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+          setTimelapseClipObjects(clips.map(c => c.clip));
+          setReelMode("timelapse");
+          setComposedDaySpan(clips.length);
+          setReelPreviewVisible(true);
+        }
+      })();
+    } else {
+      // Video mode: open chapter reveal screen
+      setChapterRevealOpen(true);
+    }
     if (!selectedJourney) return;
     trackEvent("past_chapter_opened", {
       journeyId: selectedJourney.id,
@@ -919,16 +863,16 @@ export function ProgressScreen({
             {selectedJourney ? (
               <View style={[styles.heroIdentityWrap, compactMode ? styles.heroIdentityWrapCompact : null]}>
                 <LinearGradient
-                  colors={theme.gradients.heroSurface}
+                  colors={darkMode ? theme.gradients.heroSurfaceDark : theme.gradients.heroSurface}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.heroIdentityPanel}
                 >
-                  <Text style={styles.heroEyebrow}>{selectedJourney.title.toLowerCase()}</Text>
-                  <Text style={[styles.heroTitle, compactMode ? styles.heroTitleCompact : null]}>
+                  <Text style={[styles.heroEyebrow, darkMode ? styles.darkText : null]}>{selectedJourney.title.toLowerCase()}</Text>
+                  <Text style={[styles.heroTitle, compactMode ? styles.heroTitleCompact : null, darkMode ? styles.darkTextPrimary : null]}>
                     {revealReady ? "reveal live" : `chapter ${chapterNumber}`}
                   </Text>
-                  <Text style={[styles.heroMetaLine, tightMode ? styles.heroMetaLineCompact : null]}>
+                  <Text style={[styles.heroMetaLine, tightMode ? styles.heroMetaLineCompact : null, darkMode ? styles.darkText : null]}>
                     {compareReady ? "day 1 → today" : chapterCountdownLabel}
                   </Text>
                 </LinearGradient>
@@ -943,6 +887,38 @@ export function ProgressScreen({
             {/* Loading text removed — glitchy on tab switch */}
 
             {!journeysLoading && journeys.length === 0 ? <NoJourneyCard onStartJourney={() => onOpenJourneysTab()} /> : null}
+
+            {selectedJourney && (reveals.length > 0 || chapterNumber > 1) ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chapterTimelineStrip}
+                style={styles.chapterTimelineStripWrap}
+              >
+                {Array.from({ length: chapterNumber }, (_, i) => {
+                  const num = i + 1;
+                  const isCompleted = num < chapterNumber;
+                  const isCurrent = num === chapterNumber;
+                  return (
+                    <View key={num} style={styles.chapterTimelineNode}>
+                      {i > 0 ? <View style={[styles.chapterTimelineConnector, isCompleted || isCurrent ? styles.chapterTimelineConnectorFilled : null]} /> : null}
+                      <View
+                        style={[
+                          styles.chapterTimelineDotNode,
+                          isCompleted ? styles.chapterTimelineDotCompleted : null,
+                          isCurrent ? styles.chapterTimelineDotCurrent : null,
+                          !isCompleted && !isCurrent && darkMode ? { borderColor: "rgba(255,255,255,0.15)", backgroundColor: "rgba(30,28,26,0.9)" } : null
+                        ]}
+                      >
+                        <Text style={[styles.chapterTimelineDotText, isCompleted ? styles.chapterTimelineDotTextCompleted : null, darkMode && !isCompleted ? styles.darkText : null]}>
+                          {num}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
 
             {selectedJourney ? (
               <Animated.View
@@ -971,9 +947,11 @@ export function ProgressScreen({
                 <Animated.View style={{ transform: [{ scale: revealCapsulePulse }] }}>
                   <LinearGradient
                     colors={
-                      revealReady
-                        ? theme.gradients.heroSurfaceReveal
-                        : theme.gradients.intelCard
+                      darkMode
+                        ? theme.gradients.intelCardDark
+                        : revealReady
+                          ? theme.gradients.heroSurfaceReveal
+                          : theme.gradients.intelCard
                     }
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
@@ -984,7 +962,7 @@ export function ProgressScreen({
                     ]}
                   >
                     <View style={styles.revealCapsuleTopRow}>
-                      <Text style={[styles.revealCapsuleEyebrow, revealReady ? styles.revealCapsuleEyebrowReady : undefined]}>
+                      <Text style={[styles.revealCapsuleEyebrow, revealReady ? styles.revealCapsuleEyebrowReady : undefined, darkMode ? styles.darkText : null]}>
                         {revealReady ? "reveal stage" : compareReady ? "compare stage" : "build stage"}
                       </Text>
                       <View style={styles.revealCapsuleTopActions}>
@@ -1004,10 +982,10 @@ export function ProgressScreen({
                       </View>
                     </View>
 
-                    <Text style={[styles.revealCapsuleTitle, compactMode ? styles.revealCapsuleTitleCompact : null]}>
+                    <Text style={[styles.revealCapsuleTitle, compactMode ? styles.revealCapsuleTitleCompact : null, darkMode ? styles.darkTextPrimary : null]}>
                       {compareReady ? "day 1 vs now" : "keep this chapter moving."}
                     </Text>
-                    <Text style={[styles.revealCapsuleCopy, compactMode ? styles.revealCapsuleCopyCompact : null]}>
+                    <Text style={[styles.revealCapsuleCopy, compactMode ? styles.revealCapsuleCopyCompact : null, darkMode ? styles.darkText : null]}>
                       {compareReady
                         ? revealReady
                           ? "see how far you've come."
@@ -1026,37 +1004,40 @@ export function ProgressScreen({
                       </View>
                     ) : null}
 
+                    {!revealReady && !didPracticeToday ? (
+                      <TactilePressable
+                        style={styles.todayNudge}
+                        pressScale={0.97}
+                        onPress={() => {
+                          trackEvent("today_nudge_tapped", { journeyId: selectedJourney.id });
+                          onOpenJourneysTab({
+                            journeyId: selectedJourney.id,
+                            openRecorder: true
+                          });
+                        }}
+                      >
+                        <Text style={styles.todayNudgeDot}>●</Text>
+                        <Text style={styles.todayNudgeText}>
+                          {streak > 0
+                            ? `don't lose your ${streak}-day streak — record today's take`
+                            : "start your streak — record today's take"}
+                        </Text>
+                      </TactilePressable>
+                    ) : null}
+
                     {revealReady ? (
                       <>
                         <TactilePressable
-                          style={styles.nextChapterButton}
+                          style={styles.watchRevealButton}
                           stretch
                           pressScale={0.96}
-                          onPress={() => {
-                            triggerSelectionHaptic();
-                            void handleStartNextChapter(chapterTargetDays);
-                          }}
-                          disabled={Boolean(advancingMilestoneLength)}
-                        >
-                          <LinearGradient
-                            colors={theme.gradients.primaryAction}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.nextChapterButtonGradient}
-                          >
-                            <Text style={styles.nextChapterButtonText}>
-                              {advancingMilestoneLength ? "starting..." : "start chapter " + (chapterNumber + 1)}
-                            </Text>
-                          </LinearGradient>
-                        </TactilePressable>
-                        <TactilePressable
-                          style={styles.watchRevealLink}
-                          pressScale={0.97}
                           onPress={async () => {
+                            triggerSelectionHaptic();
                             if (selectedJourney.captureMode === "photo") {
                               const clips = await buildTimelapseClips(token, selectedJourney.id);
                               if (clips.length > 0) {
                                 setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+                                setTimelapseClipObjects(clips.map(c => c.clip));
                                 setReelMode("timelapse");
                                 setComposedDaySpan(clips.length);
                                 setReelPreviewVisible(true);
@@ -1068,7 +1049,27 @@ export function ProgressScreen({
                             trackEvent("chapter_reveal_opened", { journeyId: selectedJourney.id, chapterNumber });
                           }}
                         >
-                          <Text style={styles.watchRevealLinkText}>watch reveal</Text>
+                          <LinearGradient
+                            colors={theme.gradients.primaryAction}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.watchRevealButtonGradient}
+                          >
+                            <Text style={styles.watchRevealButtonText}>watch reveal</Text>
+                          </LinearGradient>
+                        </TactilePressable>
+                        <TactilePressable
+                          style={styles.nextChapterLink}
+                          pressScale={0.97}
+                          onPress={() => {
+                            triggerSelectionHaptic();
+                            void handleStartNextChapter(chapterTargetDays);
+                          }}
+                          disabled={Boolean(advancingMilestoneLength)}
+                        >
+                          <Text style={styles.nextChapterLinkText}>
+                            {advancingMilestoneLength ? "starting..." : "start chapter " + (chapterNumber + 1)}
+                          </Text>
                         </TactilePressable>
                       </>
                     ) : (
@@ -1080,6 +1081,7 @@ export function ProgressScreen({
                               const clips = await buildTimelapseClips(token, selectedJourney.id);
                               if (clips.length > 0) {
                                 setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
+                                setTimelapseClipObjects(clips.map(c => c.clip));
                                 setReelMode("timelapse");
                                 setComposedDaySpan(clips.length);
                                 setReelPreviewVisible(true);
@@ -1102,28 +1104,101 @@ export function ProgressScreen({
                       </TactilePressable>
                     )}
 
-                    <Animated.View
-                      style={[
-                        styles.chapterStatusFooter,
-                        {
-                          opacity: nextUnlockReveal,
-                          transform: [
-                            {
-                              translateY: nextUnlockReveal.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [motionTokens.reveal.secondaryY, 0]
-                              })
-                            }
-                          ]
-                        }
-                      ]}
-                    >
-                      <Text style={styles.chapterStatusFooterText}>{revealReady ? "" : compareReady ? "compare ready" : "in build"}</Text>
-                    </Animated.View>
+                    {!revealReady ? (
+                      <Animated.View
+                        style={[
+                          styles.chapterStatusFooter,
+                          darkMode && { borderTopColor: "rgba(255,255,255,0.08)" },
+                          {
+                            opacity: nextUnlockReveal,
+                            transform: [
+                              {
+                                translateY: nextUnlockReveal.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [motionTokens.reveal.secondaryY, 0]
+                                })
+                              }
+                            ]
+                          }
+                        ]}
+                      >
+                        <Text style={[styles.chapterStatusFooterText, darkMode && styles.darkText]}>{compareReady ? "compare ready" : "in build"}</Text>
+                      </Animated.View>
+                    ) : null}
                   </LinearGradient>
                 </Animated.View>
                 {chapterActionMessage ? <Text style={styles.chapterActionMessage}>{chapterActionMessage}</Text> : null}
               </Animated.View>
+            ) : null}
+
+            {selectedJourney ? (
+              <View style={[styles.statsStrip, darkMode ? styles.darkCard : null]}>
+                <View style={styles.statTile}>
+                  <View style={styles.streakValueRow}>
+                    <Text style={[styles.statValue, darkMode ? styles.darkTextPrimary : null]}>{streak}</Text>
+                    {streak >= 3 ? (
+                      <Animated.Text
+                        style={[
+                          styles.streakFlame,
+                          {
+                            opacity: streakFlamePulse.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }),
+                            transform: [
+                              { scale: streakFlamePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }) },
+                              { translateY: streakFlamePulse.interpolate({ inputRange: [0, 1], outputRange: [0, -2] }) }
+                            ]
+                          }
+                        ]}
+                      >
+                        🔥
+                      </Animated.Text>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.statLabel, darkMode ? styles.darkText : null]}>day streak</Text>
+                  {bestStreak > streak ? (
+                    <Text style={styles.bestStreakLabel}>best: {bestStreak}</Text>
+                  ) : null}
+                </View>
+                <View style={[styles.statTileDivider, darkMode ? styles.darkDivider : null]} />
+                <View style={styles.statTile}>
+                  <Text style={[styles.statValue, darkMode ? styles.darkTextPrimary : null]}>{dayCount}</Text>
+                  <Text style={[styles.statLabel, darkMode ? styles.darkText : null]}>total takes</Text>
+                </View>
+                <View style={[styles.statTileDivider, darkMode ? styles.darkDivider : null]} />
+                <View style={styles.statTile}>
+                  <Text style={[styles.statValue, darkMode ? styles.darkTextPrimary : null]}>{reveals.length}</Text>
+                  <Text style={[styles.statLabel, darkMode ? styles.darkText : null]}>{reveals.length === 1 ? "chapter done" : "chapters done"}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {selectedJourney && showHeatmap ? (
+              <View style={[styles.heatmapCard, darkMode ? styles.darkCard : null]}>
+                <View style={styles.heatmapHeader}>
+                  <Text style={[styles.heatmapTitle, darkMode ? styles.darkTextPrimary : null]}>activity</Text>
+                  {protocolConsistency && protocolConsistency.consistencyPct > 0 ? (
+                    <Text style={styles.heatmapConsistency}>{protocolConsistency.consistencyPct}% consistency</Text>
+                  ) : null}
+                </View>
+                <View style={styles.heatmapGrid}>
+                  {Array.from({ length: 8 }, (_, weekIdx) => (
+                    <View key={weekIdx} style={styles.heatmapColumn}>
+                      {heatmapCells.slice(weekIdx * 7, weekIdx * 7 + 7).map((cell) => (
+                        <View
+                          key={cell.key}
+                          style={[
+                            styles.heatmapCell,
+                            cell.practiced
+                              ? styles.heatmapCellActive
+                              : cell.isToday
+                                ? styles.heatmapCellToday
+                                : darkMode ? styles.heatmapCellEmptyDark : styles.heatmapCellEmpty
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              </View>
             ) : null}
 
             {!selectedJourney && !journeysLoading && journeys.length > 0 ? (
@@ -1195,37 +1270,6 @@ export function ProgressScreen({
         }}
       />
 
-      <ComparisonRevealModal
-        visible={pastRevealModalOpen && Boolean(pastRevealComparisonPlan) && Boolean(selectedPastReveal)}
-        comparison={pastRevealComparisonPlan?.comparison ?? null}
-        presetLabel="replay cut"
-        entryStage="compare"
-        token={token}
-        chapterNumber={selectedPastReveal?.chapterNumber ?? 1}
-        journeyId={selectedJourney?.id ?? null}
-        goalText={selectedJourney?.goalText ?? null}
-        milestoneLengthDays={selectedPastReveal?.milestoneLengthDays ?? 7}
-        progressDays={selectedPastReveal?.recordedDays ?? 0}
-        currentStreak={Math.min(streak, selectedPastReveal?.recordedDays ?? 0)}
-        totalPracticeDays={selectedPastReveal?.recordedDays ?? 0}
-        modalBackdropReveal={pastModalBackdropReveal}
-        modalCardReveal={pastModalCardReveal}
-        thenPanelReveal={pastThenPanelReveal}
-        nowPanelReveal={pastNowPanelReveal}
-        labelsReveal={pastLabelsReveal}
-        sourceRect={null}
-        pairStrategyLabel={pastRevealComparisonPlan?.strategyLabel ?? null}
-        pairReason={pastRevealComparisonPlan?.reason ?? null}
-        pairConsistencyScore={pastRevealComparisonPlan?.consistencyScore ?? null}
-        trailerMoments={pastRevealComparisonPlan?.trailerMoments ?? null}
-        storylineHeadline={selectedPastReveal ? revealStorylines[selectedPastReveal.id]?.headline ?? null : null}
-        storylineCaption={selectedPastReveal ? revealStorylines[selectedPastReveal.id]?.caption ?? null : null}
-        storylineReflection={selectedPastReveal ? revealStorylines[selectedPastReveal.id]?.reflection ?? null : null}
-        onClose={() => {
-          setPastRevealModalOpen(false);
-          setSelectedPastReveal(null);
-        }}
-      />
 
       <Modal visible={chapterHistoryOpen} animationType="fade" transparent onRequestClose={closeChapterHistoryModal}>
         <Animated.View style={[styles.pastChapterOverlay, { opacity: historyModalBackdropOpacity }]}>
@@ -1238,98 +1282,73 @@ export function ProgressScreen({
               }
             ]}
           >
-            <GlassSurface style={styles.historyModalCard} intensity={26}>
+            <GlassSurface style={[styles.historyModalCard, darkMode && { backgroundColor: "rgba(20,18,16,0.98)", borderColor: "rgba(255,255,255,0.08)" }]} intensity={26} tone={darkMode ? "dark" : "light"}>
               <View style={styles.historyModalDragHandleWrap} {...historyModalPanResponder.panHandlers}>
-                <View style={styles.historyModalDragHandle} />
+                <View style={[styles.historyModalDragHandle, darkMode && { backgroundColor: "rgba(255,255,255,0.25)" }]} />
               </View>
             <View style={styles.historyModalHeader}>
               <View>
-                <Text style={styles.pastChapterEyebrow}>journey arc</Text>
-                <Text style={styles.historyModalTitle}>chapter history</Text>
+                <Text style={[styles.pastChapterEyebrow, darkMode && styles.darkText]}>journey arc</Text>
+                <Text style={[styles.historyModalTitle, darkMode && styles.darkTextPrimary]}>chapter history</Text>
               </View>
-              <TactilePressable style={styles.historyModalCloseChip} onPress={closeChapterHistoryModal}>
-                <Text style={styles.historyModalCloseText}>close</Text>
+              <TactilePressable style={[styles.historyModalCloseChip, darkMode && { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.1)" }]} onPress={closeChapterHistoryModal}>
+                <Text style={[styles.historyModalCloseText, darkMode && styles.darkTextPrimary]}>close</Text>
               </TactilePressable>
             </View>
-            {!revealsLoading && sortedReveals.length > 0 ? (
-              <View style={styles.historyVerdictTrendCard}>
-                <Text style={styles.historyVerdictTrendKicker}>replay picker</Text>
-                <Text style={styles.historyVerdictTrendHint}>tap any completed chapter to open its replay.</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.historyVerdictTrendRow}>
-                  {sortedReveals.map((reveal) => {
-                    const replayReady = Boolean(revealReplayPlans[reveal.id]);
-                    return (
-                      <TactilePressable
-                        key={`${reveal.id}-${reveal.chapterNumber}`}
-                        style={[
-                          styles.historyVerdictTrendPill,
-                          replayReady ? styles.historyVerdictTrendPillGood : styles.historyVerdictTrendPillPending
-                        ]}
-                        onPress={() => {
-                          openPastReveal(reveal, "history_picker");
-                        }}
-                      >
-                        <Text style={styles.historyVerdictTrendMeta}>C{reveal.chapterNumber}</Text>
-                        <Text style={styles.historyVerdictTrendText}>{replayReady ? "replay ready" : "processing"}</Text>
-                      </TactilePressable>
-                    );
-                  })}
-                </ScrollView>
-                {renderReplayOpenStatus ? (
-                  <Animated.Text
-                    style={[
-                      styles.historyVerdictCooldownMessage,
+            {renderReplayOpenStatus ? (
+              <Animated.Text
+                style={[
+                  styles.historyVerdictCooldownMessage,
+                  {
+                    opacity: replayOpenStatusReveal,
+                    color: replayOpenStatusPulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [theme.colors.accentStrong, "#ff7b45"]
+                    }),
+                    transform: [
                       {
-                        opacity: replayOpenStatusReveal,
-                        color: replayOpenStatusPulse.interpolate({
+                        translateY: replayOpenStatusReveal.interpolate({
                           inputRange: [0, 1],
-                          outputRange: [theme.colors.accentStrong, "#ff7b45"]
-                        }),
-                        transform: [
-                          {
-                            translateY: replayOpenStatusReveal.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [2, 0]
-                            })
-                          },
-                          {
-                            scale: replayOpenStatusPulse.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [1, 1.02]
-                            })
-                          }
-                        ]
+                          outputRange: [2, 0]
+                        })
+                      },
+                      {
+                        scale: replayOpenStatusPulse.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 1.02]
+                        })
                       }
-                    ]}
-                  >
-                    {replayOpenStatusMessage ?? "opening replay..."}
-                  </Animated.Text>
-                ) : null}
-              </View>
+                    ]
+                  }
+                ]}
+              >
+                {replayOpenStatusMessage ?? "opening replay..."}
+              </Animated.Text>
             ) : null}
 
-            {revealsLoading ? <Text style={styles.archiveMuted}>loading chapters...</Text> : null}
-            {!revealsLoading && reveals.length === 0 ? <Text style={styles.archiveMuted}>no completed chapters yet.</Text> : null}
+            {revealsLoading ? <Text style={[styles.archiveMuted, darkMode && styles.darkText]}>loading chapters...</Text> : null}
+            {!revealsLoading && reveals.length === 0 ? <Text style={[styles.archiveMuted, darkMode && styles.darkText]}>no completed chapters yet.</Text> : null}
             {!revealsLoading ? (
               <ScrollView style={styles.historyModalList} showsVerticalScrollIndicator={false}>
                 {reveals.map((reveal) => {
                   const replayReady = Boolean(revealReplayPlans[reveal.id]);
-                  const storyline = revealStorylines[reveal.id];
+                  const momentCount = revealReplayPlans[reveal.id]?.trailerMoments.length ?? 0;
+                  const completedDate = new Date(reveal.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
                   return (
                     <TactilePressable
                       key={reveal.id}
-                      style={[styles.chapterTimelineRow, !replayReady ? styles.chapterTimelineRowDisabled : undefined]}
+                      style={[styles.chapterTimelineRow, darkMode && { backgroundColor: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.06)" }, !replayReady ? styles.chapterTimelineRowDisabled : undefined]}
                       onPress={() => {
                         openPastReveal(reveal, "history_row");
                       }}
                     >
                       <View style={styles.chapterTimelineRail}>
-                        <View style={styles.chapterTimelineLine} />
+                        <View style={[styles.chapterTimelineLine, darkMode && { backgroundColor: "rgba(255,255,255,0.3)" }]} />
                         <View style={styles.chapterTimelineDot} />
                       </View>
                       <View style={styles.chapterTimelineBody}>
                         <View style={styles.archiveRowTop}>
-                          <Text style={styles.archiveRowTitle}>{storyline?.headline ?? `chapter ${reveal.chapterNumber}`}</Text>
+                          <Text style={[styles.archiveRowTitle, darkMode && styles.darkTextPrimary]}>chapter {reveal.chapterNumber}</Text>
                           <View
                             style={[
                               styles.archiveVerdictPill,
@@ -1342,23 +1361,12 @@ export function ProgressScreen({
                                 replayReady ? styles.archiveVerdictTextGood : styles.archiveVerdictTextNeutral
                               ]}
                             >
-                              {replayReady ? "replay ready" : "processing"}
+                              {replayReady ? "watch reveal" : "processing"}
                             </Text>
                           </View>
                         </View>
-                        <Text style={styles.archiveRowMeta}>
-                          {storyline?.caption ?? `${new Date(reveal.completedAt).toLocaleDateString()} • ${reveal.recordedDays} takes logged`}
-                        </Text>
-                        {storyline ? <Text style={styles.archiveStoryReflection}>{storyline.reflection}</Text> : null}
-                        <Text
-                          style={[
-                            styles.archiveReplayState,
-                            replayReady ? styles.archiveReplayStateReady : styles.archiveReplayStateMissing
-                          ]}
-                        >
-                          {replayReady
-                            ? `replay ready • ${revealReplayPlans[reveal.id]?.trailerMoments.length ?? 0} moments`
-                            : "replay cut unavailable"}
+                        <Text style={[styles.archiveRowMeta, darkMode && styles.darkText]}>
+                          {reveal.recordedDays}/{reveal.milestoneLengthDays} days captured{momentCount > 0 ? ` • ${momentCount}-moment reel` : ""} • Completed {completedDate}
                         </Text>
                       </View>
                     </TactilePressable>
@@ -1380,12 +1388,26 @@ export function ProgressScreen({
         onClose={() => setReelPreviewVisible(false)}
         mode={reelMode}
         timelapsePhotos={reelMode === "timelapse" ? timelapsePhotos : undefined}
+        timelapseClips={reelMode === "timelapse" ? timelapseClipObjects : undefined}
         token={token}
         journeyId={selectedJourney?.id}
       />
       <ChapterRevealScreen
         visible={chapterRevealOpen}
-        reelExportInput={{
+        reelExportInput={selectedPastReveal ? {
+          chapterNumber: selectedPastReveal.chapterNumber,
+          trailerMoments: revealReplayPlans[selectedPastReveal.id]?.trailerMoments ?? null,
+          sourceClips: revealTrackClips,
+          fallbackClip: null,
+          milestoneLengthDays: selectedPastReveal.milestoneLengthDays,
+          progressDays: selectedPastReveal.recordedDays,
+          currentStreak: Math.min(streak, selectedPastReveal.recordedDays),
+          storylineHeadline: revealStorylines[selectedPastReveal.id]?.headline ?? null,
+          storylineCaption: revealStorylines[selectedPastReveal.id]?.caption ?? null,
+          storylineReflection: revealStorylines[selectedPastReveal.id]?.reflection ?? null,
+          token,
+          journeyId: selectedJourney?.id ?? null,
+        } : {
           chapterNumber,
           trailerMoments: comparisonPlan?.trailerMoments ?? null,
           sourceClips: revealTrackClips,
@@ -1399,10 +1421,14 @@ export function ProgressScreen({
           token,
           journeyId: selectedJourney?.id ?? null,
         }}
-        daySpan={chapterProgressDays}
-        chapterNumber={chapterNumber}
+        daySpan={selectedPastReveal?.recordedDays ?? chapterProgressDays}
+        chapterNumber={selectedPastReveal?.chapterNumber ?? chapterNumber}
         goalText={selectedJourney?.goalText ?? null}
-        onClose={() => setChapterRevealOpen(false)}
+        darkMode={darkMode}
+        onClose={() => {
+          setChapterRevealOpen(false);
+          setSelectedPastReveal(null);
+        }}
       />
       <PaywallModal
         visible={historyPaywallVisible}
@@ -1736,28 +1762,28 @@ const styles = StyleSheet.create({
   revealCapsulePrimaryTextCompact: {
     fontSize: 15
   },
-  nextChapterButton: {
+  watchRevealButton: {
     marginTop: 12,
     borderRadius: 24,
     overflow: "hidden",
   },
-  nextChapterButtonGradient: {
+  watchRevealButtonGradient: {
     paddingVertical: 16,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 24,
   },
-  nextChapterButtonText: {
+  watchRevealButtonText: {
     color: "#ffffff",
     fontWeight: "800",
     fontSize: 16,
   },
-  watchRevealLink: {
+  nextChapterLink: {
     marginTop: 10,
     alignSelf: "center",
     paddingVertical: 8,
   },
-  watchRevealLinkText: {
+  nextChapterLinkText: {
     color: theme.colors.accent,
     fontWeight: "700",
     fontSize: 15,
@@ -1855,11 +1881,181 @@ const styles = StyleSheet.create({
     /* textTransform: "uppercase", */
     fontFamily: theme.typography.label
   },
+  todayNudge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,90,31,0.1)",
+    gap: 8
+  },
+  todayNudgeDot: {
+    fontSize: 8,
+    color: theme.colors.accentStrong
+  },
+  todayNudgeText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.accentStrong
+  },
   chapterActionMessage: {
     marginTop: 10,
     color: theme.colors.textSecondary,
     fontWeight: "700",
     fontSize: 12
+  },
+  chapterTimelineStripWrap: {
+    marginTop: 10,
+    marginBottom: -4
+  },
+  chapterTimelineStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    paddingVertical: 6
+  },
+  chapterTimelineNode: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  chapterTimelineConnector: {
+    width: 20,
+    height: 2,
+    backgroundColor: "rgba(0,0,0,0.1)",
+    marginHorizontal: 2
+  },
+  chapterTimelineConnectorFilled: {
+    backgroundColor: theme.colors.accentStrong
+  },
+  chapterTimelineDotNode: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "rgba(246,240,232,0.9)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  chapterTimelineDotCompleted: {
+    backgroundColor: theme.colors.accentStrong,
+    borderColor: theme.colors.accentStrong
+  },
+  chapterTimelineDotCurrent: {
+    borderColor: theme.colors.accentStrong,
+    borderWidth: 2.5
+  },
+  chapterTimelineDotText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.textSecondary
+  },
+  chapterTimelineDotTextCompleted: {
+    color: "#fff"
+  },
+  statsStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(246,240,232,0.85)",
+    paddingVertical: 14,
+    paddingHorizontal: 6
+  },
+  statTile: {
+    flex: 1,
+    alignItems: "center"
+  },
+  statTileDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "rgba(0,0,0,0.1)"
+  },
+  streakValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2
+  },
+  streakFlame: {
+    fontSize: 20,
+    marginTop: -2
+  },
+  statValue: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display
+  },
+  statLabel: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.textSecondary,
+    textTransform: "lowercase" as const
+  },
+  bestStreakLabel: {
+    marginTop: 1,
+    fontSize: 10,
+    fontWeight: "700",
+    color: theme.colors.accentStrong
+  },
+  heatmapCard: {
+    marginTop: 14,
+    borderRadius: theme.shape.cardRadiusMd,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(246,240,232,0.85)",
+    padding: 14
+  },
+  heatmapHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10
+  },
+  heatmapTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: theme.colors.textPrimary,
+    textTransform: "lowercase" as const
+  },
+  heatmapConsistency: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: theme.colors.accentStrong
+  },
+  heatmapGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 3
+  },
+  heatmapColumn: {
+    flex: 1,
+    gap: 3
+  },
+  heatmapCell: {
+    aspectRatio: 1,
+    borderRadius: 3,
+    width: "100%"
+  },
+  heatmapCellActive: {
+    backgroundColor: theme.colors.accentStrong
+  },
+  heatmapCellToday: {
+    backgroundColor: "rgba(255,90,31,0.18)",
+    borderWidth: 1.5,
+    borderColor: theme.colors.accentStrong
+  },
+  heatmapCellEmpty: {
+    backgroundColor: "rgba(0,0,0,0.06)"
+  },
+  heatmapCellEmptyDark: {
+    backgroundColor: "rgba(255,255,255,0.08)"
   },
   protocolCard: {
     marginTop: 12,
@@ -2216,8 +2412,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.54)",
     alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 20
+    justifyContent: "flex-end",
   },
   pastChapterCard: {
     width: "100%",
@@ -2229,15 +2424,18 @@ const styles = StyleSheet.create({
   },
   historyModalCard: {
     width: "100%",
-    maxHeight: "72%",
-    borderRadius: theme.shape.cardRadiusLg,
+    maxHeight: "92%",
+    borderTopLeftRadius: theme.shape.cardRadiusLg,
+    borderTopRightRadius: theme.shape.cardRadiusLg,
     borderWidth: 1,
+    borderBottomWidth: 0,
     borderColor: "rgba(0,0,0,0.08)",
     backgroundColor: "rgba(246,240,232,0.98)",
-    padding: 18
+    padding: 18,
+    paddingBottom: 34,
   },
   historyModalCardMotion: {
-    width: "100%"
+    width: "100%",
   },
   historyModalDragHandleWrap: {
     alignItems: "center",
@@ -2259,7 +2457,8 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   historyModalList: {
-    marginTop: 6
+    marginTop: 6,
+    paddingBottom: 24,
   },
   historyVerdictTrendCard: {
     marginTop: 8,
@@ -2570,5 +2769,18 @@ const styles = StyleSheet.create({
   },
   historyContentWrap: {
     overflow: "hidden"
+  },
+  darkCard: {
+    backgroundColor: theme.darkColors.cardBg,
+    borderColor: theme.darkColors.cardBorder
+  },
+  darkTextPrimary: {
+    color: theme.darkColors.textPrimary
+  },
+  darkText: {
+    color: theme.darkColors.textSecondary
+  },
+  darkDivider: {
+    backgroundColor: "rgba(255,255,255,0.1)"
   }
 });
