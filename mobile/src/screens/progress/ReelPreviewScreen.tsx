@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Image,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -183,11 +182,31 @@ export default function ReelPreviewScreen({
     }
   }, [videoReady, videoError, contentAnim]);
 
-  function handlePlaybackStatus(status: AVPlaybackStatus) {
+  const firstVideoLoaded = useRef(false);
+  const latestVideoLoaded = useRef(false);
+
+  useEffect(() => {
+    if (visible) {
+      firstVideoLoaded.current = false;
+      latestVideoLoaded.current = false;
+    }
+  }, [visible]);
+
+  function handleFirstPlaybackStatus(status: AVPlaybackStatus) {
     if (!status.isLoaded) return;
-    if (!videoReady) {
-      setVideoReady(true);
-      playRevealSound();
+    if (!firstVideoLoaded.current) {
+      firstVideoLoaded.current = true;
+      if (!videoReady) {
+        setVideoReady(true);
+        playRevealSound();
+      }
+    }
+  }
+
+  function handleLatestPlaybackStatus(status: AVPlaybackStatus) {
+    if (!status.isLoaded) return;
+    if (!latestVideoLoaded.current) {
+      latestVideoLoaded.current = true;
     }
   }
 
@@ -281,7 +300,7 @@ export default function ReelPreviewScreen({
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={onClose}>
+    <View style={StyleSheet.absoluteFill}>
     <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
       {/* Close button */}
       <Pressable
@@ -355,28 +374,32 @@ export default function ReelPreviewScreen({
           ) : (
             <>
               {firstClipUri ? (
-                <Video
-                  source={{ uri: firstClipUri }}
-                  style={[StyleSheet.absoluteFill, { opacity: showingNow ? 0 : 1 }]}
-                  resizeMode={ResizeMode.COVER}
-                  isLooping
-                  isMuted={!purchaseUnlocked}
-                  shouldPlay={visible && !showingNow}
-                  onPlaybackStatusUpdate={handlePlaybackStatus}
-                  onError={() => setVideoError(true)}
-                />
+                <View style={[StyleSheet.absoluteFill, showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "none" : "auto"}>
+                  <Video
+                    source={{ uri: firstClipUri }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    isMuted={!purchaseUnlocked}
+                    shouldPlay={visible && !showingNow}
+                    onPlaybackStatusUpdate={handleFirstPlaybackStatus}
+                    onError={() => setVideoError(true)}
+                  />
+                </View>
               ) : null}
               {latestClipUri ? (
-                <Video
-                  source={{ uri: latestClipUri }}
-                  style={[StyleSheet.absoluteFill, { opacity: showingNow ? 1 : 0 }]}
-                  resizeMode={ResizeMode.COVER}
-                  isLooping
-                  isMuted={!purchaseUnlocked}
-                  shouldPlay={visible && showingNow}
-                  onPlaybackStatusUpdate={handlePlaybackStatus}
-                  onError={() => setVideoError(true)}
-                />
+                <View style={[StyleSheet.absoluteFill, !showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "auto" : "none"}>
+                  <Video
+                    source={{ uri: latestClipUri }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode={ResizeMode.COVER}
+                    isLooping
+                    isMuted={!purchaseUnlocked}
+                    shouldPlay={visible && showingNow}
+                    onPlaybackStatusUpdate={handleLatestPlaybackStatus}
+                    onError={() => setVideoError(true)}
+                  />
+                </View>
               ) : null}
             </>
           )}
@@ -486,7 +509,7 @@ export default function ReelPreviewScreen({
         }}
       />
     </Animated.View>
-    </Modal>
+    </View>
   );
 }
 

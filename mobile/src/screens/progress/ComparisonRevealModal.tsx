@@ -1758,7 +1758,7 @@ export function ComparisonRevealModal({
         goalText={goalText}
         onClose={() => {
           setReelPreviewVisible(false);
-          onClose();
+          setTimeout(onClose, 150);
         }}
       />
     </Modal>
