@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm install && npm run build --workspace=backend"
+
+[deploy]
+startCommand = "npm run start --workspace=backend"
