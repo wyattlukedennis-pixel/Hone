@@ -131,6 +131,47 @@ export function createClip(
   }));
 }
 
+/**
+ * Upload a local clip file to the server and update the clip's videoUrl.
+ * Used to make local clips available for server-side rendering.
+ */
+export async function uploadLocalClipForRender(
+  token: string,
+  journeyId: string,
+  clip: { id: string; captureType: "video" | "photo"; durationMs: number; recordedAt: string; recordedOn: string },
+  localFileUri: string
+) {
+  const mimeType = clip.captureType === "photo" ? "image/jpeg" : "video/mp4";
+  const fileExtension = clip.captureType === "photo" ? "jpg" : "mp4";
+
+  // Get an upload URL from the server
+  const uploadInfo = await requestClipUploadUrl(token, journeyId, {
+    mimeType,
+    fileExtension,
+    captureType: clip.captureType
+  });
+
+  // Upload the file
+  await uploadClipFile({
+    token,
+    uploadUrl: uploadInfo.uploadUrl,
+    fileField: uploadInfo.fileField,
+    fileUri: localFileUri,
+    mimeType
+  });
+
+  // Create/update the clip record with the server media URL
+  const result = await createClip(token, journeyId, {
+    uploadId: uploadInfo.uploadId,
+    durationMs: clip.durationMs,
+    recordedAt: clip.recordedAt,
+    recordedOn: clip.recordedOn,
+    captureType: clip.captureType
+  });
+
+  return result;
+}
+
 /** Create a clip record on the backend without uploading a file. */
 export function createClipLocal(
   token: string,

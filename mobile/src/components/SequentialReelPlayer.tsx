@@ -77,11 +77,13 @@ export function SequentialReelPlayer({
     }, FLASH_DURATION_MS);
   }, [currentIndex, clips.length, loop, labelOpacity]);
 
-  // When a clip becomes ready, start the hold timer
+  const clipTimerStarted = useRef(false);
+
+  // When a clip becomes ready, start the hold timer (once per clip)
   const onClipReady = useCallback(() => {
     if (!ready) setReady(true);
-    if (!playing || !clip) return;
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    if (!playing || !clip || clipTimerStarted.current) return;
+    clipTimerStarted.current = true;
     holdTimerRef.current = setTimeout(advanceClip, clip.holdMs);
   }, [playing, clip, advanceClip, ready]);
 
@@ -100,6 +102,7 @@ export function SequentialReelPlayer({
 
   // Reset hold timer when index changes
   useEffect(() => {
+    clipTimerStarted.current = false;
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;

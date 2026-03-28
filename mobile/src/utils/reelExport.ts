@@ -2,6 +2,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 
+import { uploadLocalClipForRender } from "../api/clips";
+import { getAllClipLocalUris } from "../storage/clipFileStore";
 import { requestJson } from "../api/http";
 import type { Clip } from "../types/clip";
 import type { ChapterTrailerMoment } from "./progress";
@@ -159,12 +161,54 @@ function buildRenderClipIds(input: ExportReelInput) {
   return deduped;
 }
 
+async function uploadLocalClipsForRender(input: ExportReelInput): Promise<void> {
+  if (!input.token || !input.journeyId) return;
+  const localUris = await getAllClipLocalUris();
+  const allClips = [
+    ...(input.sourceClips ?? []),
+    ...(input.trailerMoments ?? []).map((m) => m.clip),
+    ...(input.fallbackClip ? [input.fallbackClip] : [])
+  ];
+  // Dedupe by clip ID
+  const seen = new Set<string>();
+  const uniqueClips: Clip[] = [];
+  for (const clip of allClips) {
+    if (!clip?.id || seen.has(clip.id)) continue;
+    seen.add(clip.id);
+    uniqueClips.push(clip);
+  }
+
+  for (const clip of uniqueClips) {
+    const localUri = localUris[clip.id];
+    if (!localUri) continue; // No local file — might already be on server
+    try {
+      await uploadLocalClipForRender(
+        input.token,
+        input.journeyId,
+        {
+          id: clip.id,
+          captureType: clip.captureType,
+          durationMs: clip.durationMs,
+          recordedAt: clip.recordedAt,
+          recordedOn: clip.recordedOn
+        },
+        localUri
+      );
+    } catch (error) {
+      if (__DEV__) console.warn(`[reelExport] Failed to upload clip ${clip.id} for render:`, error);
+    }
+  }
+}
+
 async function resolveRenderedReelAsset(input: ExportReelInput): Promise<ResolvedReelAsset | null> {
   if (!input.token || !input.journeyId) return null;
   const clipIds = buildRenderClipIds(input);
   if (!clipIds.length) return null;
 
   try {
+    // Upload local clips to server so the renderer can access them
+    await uploadLocalClipsForRender(input);
+
     const response = await requestJson<RenderedRevealResponse>(`/journeys/${input.journeyId}/reveal/render`, {
       token: input.token,
       method: "POST",
