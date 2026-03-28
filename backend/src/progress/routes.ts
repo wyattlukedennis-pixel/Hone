@@ -360,7 +360,7 @@ export function registerProgressRoutes(app: FastifyInstance) {
     });
 
     return reply.send({
-      url: `/uploads/${result.outputRelativePath}`,
+      url: `/media/${result.outputRelativePath}`,
       cacheHit: result.cacheHit,
       photoCount: result.photoCount,
     });
