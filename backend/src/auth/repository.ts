@@ -3,8 +3,9 @@ import type { Pool } from "pg";
 type UserRow = {
   id: string;
   email: string;
-  password_hash: string;
+  password_hash: string | null;
   display_name: string | null;
+  apple_id: string | null;
 };
 
 type SessionRow = {
@@ -17,8 +18,9 @@ type SessionRow = {
 export type AuthUser = {
   id: string;
   email: string;
-  passwordHash: string;
+  passwordHash: string | null;
   displayName: string | null;
+  appleId: string | null;
 };
 
 export type PublicUser = {
@@ -43,7 +45,8 @@ function mapUser(row: UserRow): AuthUser {
     id: row.id,
     email: row.email,
     passwordHash: row.password_hash,
-    displayName: row.display_name
+    displayName: row.display_name,
+    appleId: row.apple_id
   };
 }
 
@@ -67,7 +70,7 @@ export function toPublicUser(user: Pick<AuthUser, "id" | "email" | "displayName"
 export async function findUserByEmail(pool: Pool, email: string) {
   const result = await pool.query<UserRow>(
     `
-      SELECT id, email, password_hash, display_name
+      SELECT id, email, password_hash, display_name, apple_id
       FROM users
       WHERE email = $1
       LIMIT 1
@@ -80,7 +83,7 @@ export async function findUserByEmail(pool: Pool, email: string) {
 export async function findUserById(pool: Pool, userId: string) {
   const result = await pool.query<UserRow>(
     `
-      SELECT id, email, password_hash, display_name
+      SELECT id, email, password_hash, display_name, apple_id
       FROM users
       WHERE id = $1
       LIMIT 1
@@ -90,17 +93,42 @@ export async function findUserById(pool: Pool, userId: string) {
   return result.rows[0] ? mapUser(result.rows[0]) : null;
 }
 
-export async function createUser(pool: Pool, params: { email: string; passwordHash: string; displayName: string | null }) {
+export async function findUserByAppleId(pool: Pool, appleId: string) {
   const result = await pool.query<UserRow>(
     `
-      INSERT INTO users (email, password_hash, display_name)
-      VALUES ($1, $2, $3)
-      RETURNING id, email, password_hash, display_name
+      SELECT id, email, password_hash, display_name, apple_id
+      FROM users
+      WHERE apple_id = $1
+      LIMIT 1
     `,
-    [params.email, params.passwordHash, params.displayName]
+    [appleId]
+  );
+  return result.rows[0] ? mapUser(result.rows[0]) : null;
+}
+
+export async function createUser(pool: Pool, params: { email: string; passwordHash: string | null; displayName: string | null; appleId?: string | null }) {
+  const result = await pool.query<UserRow>(
+    `
+      INSERT INTO users (email, password_hash, display_name, apple_id)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, email, password_hash, display_name, apple_id
+    `,
+    [params.email, params.passwordHash, params.displayName, params.appleId ?? null]
   );
 
   return mapUser(result.rows[0]);
+}
+
+export async function linkAppleId(pool: Pool, userId: string, appleId: string) {
+  await pool.query(
+    `UPDATE users SET apple_id = $1, updated_at = NOW() WHERE id = $2`,
+    [appleId, userId]
+  );
+}
+
+export async function deleteUser(pool: Pool, userId: string) {
+  // auth_sessions, journeys, clips etc. cascade via FK ON DELETE CASCADE
+  await pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
 }
 
 export async function createSession(pool: Pool, params: { userId: string; expiresAt: Date }) {

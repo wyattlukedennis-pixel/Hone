@@ -15,6 +15,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.hone.mobile",
       "icon": "./src/assets/logo.png",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "hone needs camera access to record your daily practice clips",
         "NSMicrophoneUsageDescription": "hone needs microphone access to capture audio in your practice clips",
@@ -24,6 +25,10 @@
     },
     "android": {
       "package": "com.hone.mobile"
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-apple-authentication"
+    ]
   }
 }

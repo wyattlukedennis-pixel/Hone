@@ -27,9 +27,11 @@ import Purchases, {
 
 /**
  * Set this to your RevenueCat Apple API key to enable real purchases.
- * Leave empty for simulated dev flow.
+ * Leave empty for simulated dev flow (only works in __DEV__).
+ *
+ * IMPORTANT: Set this before submitting to the App Store.
  */
-const REVENUECAT_API_KEY = "";
+const REVENUECAT_API_KEY = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY ?? "";
 
 const ENTITLEMENT_ID = "reveal_export";
 const PRODUCT_ID = "com.hone.mobile.reveal_export";
@@ -53,6 +55,10 @@ function checkEntitlement(info: CustomerInfo): boolean {
 /** Initialize purchase state. Call once on app startup. */
 export async function initPurchases(): Promise<void> {
   if (_initialized) return;
+
+  if (!REVENUECAT_API_KEY && !__DEV__) {
+    console.warn("[purchases] EXPO_PUBLIC_REVENUECAT_API_KEY is not set — purchases will be simulated. This must be set before App Store submission.");
+  }
 
   if (REVENUECAT_API_KEY) {
     try {

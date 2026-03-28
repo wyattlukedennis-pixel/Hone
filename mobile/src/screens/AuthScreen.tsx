@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import * as AppleAuthentication from "expo-apple-authentication";
 
 import { GlassSurface } from "../components/GlassSurface";
 import { theme } from "../theme";
@@ -13,15 +14,23 @@ type AuthFormValues = {
   displayName: string;
 };
 
+type AppleAuthResult = {
+  appleUserId: string;
+  email: string | null;
+  displayName: string | null;
+  identityToken: string | null;
+};
+
 type AuthScreenProps = {
   mode: AuthMode;
   loading: boolean;
   errorMessage: string | null;
   onModeChange: (mode: AuthMode) => void;
   onSubmit: (values: AuthFormValues) => Promise<void>;
+  onAppleAuth: (result: AppleAuthResult) => Promise<void>;
 };
 
-export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit }: AuthScreenProps) {
+export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit, onAppleAuth }: AuthScreenProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -151,6 +160,44 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
             <Text style={styles.submitText}>{loading ? "working..." : isSignup ? "start account" : "sign in"}</Text>
           </LinearGradient>
         </Pressable>
+
+        {Platform.OS === "ios" ? (
+          <>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={16}
+              style={styles.appleButton}
+              onPress={async () => {
+                try {
+                  const credential = await AppleAuthentication.signInAsync({
+                    requestedScopes: [
+                      AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                      AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                    ],
+                  });
+                  const displayName = [credential.fullName?.givenName, credential.fullName?.familyName]
+                    .filter(Boolean)
+                    .join(" ") || null;
+                  await onAppleAuth({
+                    appleUserId: credential.user,
+                    email: credential.email,
+                    displayName,
+                    identityToken: credential.identityToken,
+                  });
+                } catch (error: unknown) {
+                  const code = (error as { code?: string })?.code;
+                  if (code === "ERR_REQUEST_CANCELED") return;
+                }
+              }}
+            />
+          </>
+        ) : null}
       </GlassSurface>
     </ScrollView>
   );
@@ -321,5 +368,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.15,
     fontFamily: theme.typography.heading
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 16,
+    marginBottom: 4,
+    gap: 12
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(0,0,0,0.08)"
+  },
+  dividerText: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600"
+  },
+  appleButton: {
+    height: 50,
+    marginTop: 8
   }
 });

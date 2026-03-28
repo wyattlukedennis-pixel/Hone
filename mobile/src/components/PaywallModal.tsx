@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   StyleSheet,
@@ -159,6 +160,23 @@ export function PaywallModal({ visible, onClose, onPurchased }: PaywallModalProp
           <Text style={styles.finePrint}>
             one-time payment · no subscription · works forever
           </Text>
+
+          {/* Legal links (required by App Store Review Guideline 3.1.2) */}
+          <View style={styles.legalRow}>
+            <Text
+              style={styles.legalLink}
+              onPress={() => { void Linking.openURL("https://wyattlukedennis-pixel.github.io/hone-legal/terms.html"); }}
+            >
+              terms of service
+            </Text>
+            <Text style={styles.legalSep}>·</Text>
+            <Text
+              style={styles.legalLink}
+              onPress={() => { void Linking.openURL("https://wyattlukedennis-pixel.github.io/hone-legal/privacy.html"); }}
+            >
+              privacy policy
+            </Text>
+          </View>
         </View>
       </View>
     </Modal>
@@ -269,5 +287,22 @@ const styles = StyleSheet.create({
     color: "rgba(0,0,0,0.3)",
     fontSize: 11,
     fontWeight: "500",
+  },
+  legalRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+    gap: 6,
+  },
+  legalLink: {
+    color: "rgba(0,0,0,0.35)",
+    fontSize: 11,
+    fontWeight: "500",
+    textDecorationLine: "underline",
+  },
+  legalSep: {
+    color: "rgba(0,0,0,0.2)",
+    fontSize: 11,
   },
 });

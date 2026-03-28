@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Modal, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Modal, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassSurface } from "../components/GlassSurface";
@@ -28,6 +28,7 @@ type SettingsScreenProps = {
   onClearAllRecordings: () => Promise<{ success: boolean; message: string }>;
   onGetPendingUploadsCount: () => Promise<number>;
   onRetryPendingUploads: () => Promise<{ success: boolean; message: string; remaining: number }>;
+  onDeleteAccount: () => Promise<void>;
 };
 
 function formatOffsetLabel(offset: number) {
@@ -37,16 +38,22 @@ function formatOffsetLabel(offset: number) {
   return `-${absolute} day${absolute === 1 ? "" : "s"}`;
 }
 
+const PRIVACY_POLICY_URL = "https://wyattlukedennis-pixel.github.io/hone-legal/privacy.html";
+const TERMS_OF_SERVICE_URL = "https://wyattlukedennis-pixel.github.io/hone-legal/terms.html";
+
 export function SettingsScreen({
   user,
   onLogout,
   loggingOut,
   dailyMomentSettings,
   onDailyMomentSettingsChange,
+  hapticsMode,
+  onHapticsModeChange,
   devDateShiftSettings,
   onDevDateShiftSettingsChange,
   onClearAllRecordings,
-  onGetPendingUploadsCount
+  onGetPendingUploadsCount,
+  onDeleteAccount
 }: SettingsScreenProps) {
   const insets = useSafeAreaInsets();
   const isDevToolsVisible = __DEV__ && devDateShiftSettings;
@@ -141,7 +148,38 @@ export function SettingsScreen({
         </View>
       </GlassSurface>
 
+      <GlassSurface style={styles.card}>
+        <Text style={styles.cardLabel}>haptics</Text>
+        <View style={styles.hapticsRow}>
+          {(["full", "light", "off"] as const).map((mode) => (
+            <TactilePressable
+              key={mode}
+              style={[styles.hapticsChip, hapticsMode === mode ? styles.hapticsChipActive : undefined]}
+              onPress={() => onHapticsModeChange(mode)}
+            >
+              <Text style={[styles.hapticsChipText, hapticsMode === mode ? styles.hapticsChipTextActive : undefined]}>
+                {mode}
+              </Text>
+            </TactilePressable>
+          ))}
+        </View>
+      </GlassSurface>
 
+      <GlassSurface style={styles.card}>
+        <Text style={styles.cardLabel}>legal</Text>
+        <TactilePressable
+          style={styles.legalRow}
+          onPress={() => { void Linking.openURL(PRIVACY_POLICY_URL); }}
+        >
+          <Text style={styles.legalText}>privacy policy</Text>
+        </TactilePressable>
+        <TactilePressable
+          style={styles.legalRow}
+          onPress={() => { void Linking.openURL(TERMS_OF_SERVICE_URL); }}
+        >
+          <Text style={styles.legalText}>terms of service</Text>
+        </TactilePressable>
+      </GlassSurface>
 
       {isDevToolsVisible ? (
         <GlassSurface style={styles.card}>
@@ -288,6 +326,26 @@ export function SettingsScreen({
         disabled={loggingOut}
       >
         <Text style={styles.logoutText}>{loggingOut ? "signing out..." : "sign out"}</Text>
+      </TactilePressable>
+
+      <TactilePressable
+        style={styles.deleteAccountButton}
+        onPress={() => {
+          Alert.alert(
+            "delete account?",
+            "this will permanently delete your account and all your data. this cannot be undone.",
+            [
+              { text: "cancel", style: "cancel" },
+              {
+                text: "delete account",
+                style: "destructive",
+                onPress: () => { void onDeleteAccount(); },
+              },
+            ]
+          );
+        }}
+      >
+        <Text style={styles.deleteAccountText}>delete account</Text>
       </TactilePressable>
 
       <Modal visible={timePickerOpen} transparent animationType="slide" onRequestClose={() => setTimePickerOpen(false)}>
@@ -642,6 +700,26 @@ const styles = StyleSheet.create({
   },
   devMessageDanger: {
     color: theme.colors.danger
+  },
+  legalRow: {
+    paddingVertical: 10,
+  },
+  legalText: {
+    color: theme.colors.textSecondary,
+    fontWeight: "600",
+    fontSize: 14,
+    textDecorationLine: "underline",
+    fontFamily: theme.typography.body,
+  },
+  deleteAccountButton: {
+    marginTop: 24,
+    alignSelf: "flex-start",
+    paddingVertical: 8,
+  },
+  deleteAccountText: {
+    color: theme.colors.danger,
+    fontWeight: "600",
+    fontSize: 13,
   },
   logoutButton: {
     marginTop: 14,

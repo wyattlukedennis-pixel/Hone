@@ -55,7 +55,8 @@ function normalizeCaptureType(value: unknown) {
 }
 
 function getBaseUrl(protocol: string, host: string | undefined) {
-  const resolvedHost = host ?? "localhost:4000";
+  if (config.baseUrl) return config.baseUrl;
+  const resolvedHost = host ?? `localhost:${config.port}`;
   return `${protocol}://${resolvedHost}`;
 }
 
@@ -129,7 +130,10 @@ export function registerClipRoutes(app: FastifyInstance) {
     const file = await request.file();
     if (!file) return reply.code(400).send({ error: "FILE_REQUIRED" });
 
-    const absolutePath = path.join(config.uploads.dir, upload.objectKey);
+    const absolutePath = path.resolve(config.uploads.dir, upload.objectKey);
+    if (!absolutePath.startsWith(config.uploads.dir)) {
+      return reply.code(400).send({ error: "INVALID_UPLOAD_PATH" });
+    }
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await pipeline(file.file, createWriteStream(absolutePath));
 

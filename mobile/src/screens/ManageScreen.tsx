@@ -38,6 +38,7 @@ export type ManageScreenProps = {
   onDailyMomentSettingsChange: (next: DailyMomentSettings) => void;
   hapticsMode: HapticsMode;
   onHapticsModeChange: (next: HapticsMode) => void;
+  onDeleteAccount: () => Promise<void>;
 };
 
 export function ManageScreen({
@@ -61,6 +62,7 @@ export function ManageScreen({
   onDailyMomentSettingsChange,
   hapticsMode,
   onHapticsModeChange,
+  onDeleteAccount,
 }: ManageScreenProps) {
   const insets = useSafeAreaInsets();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -211,6 +213,7 @@ export function ManageScreen({
               onDailyMomentSettingsChange={onDailyMomentSettingsChange}
               hapticsMode={hapticsMode}
               onHapticsModeChange={onHapticsModeChange}
+              onDeleteAccount={onDeleteAccount}
             />
           </View>
         </View>

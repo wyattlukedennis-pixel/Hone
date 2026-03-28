@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 
-import { signup } from "../../api/auth";
+import { appleAuth, signup } from "../../api/auth";
 import { createJourney } from "../../api/journeys";
 import { saveAuthToken } from "../../storage/authStorage";
 import {
@@ -190,6 +190,36 @@ export function OnboardingFlow({ onComplete, onSkipToLogin }: OnboardingFlowProp
           loading={signupLoading}
           errorMessage={signupError}
           onSubmit={handleSignupSubmit}
+          onAppleAuth={async (result) => {
+            setSignupLoading(true);
+            setSignupError(null);
+            try {
+              const authResponse = await appleAuth(result);
+              const { token, user } = authResponse;
+              await saveAuthToken(token);
+
+              const effectiveSkillPack: SkillPack = selectedSkillPack === "other" ? "fitness" : selectedSkillPack;
+              const title = buildJourneyTitle(selectedSkillPack, customSkillName);
+              const category = selectedSkillPack === "other" ? customSkillName : null;
+
+              const { journey } = await createJourney(token, {
+                title,
+                skillPack: effectiveSkillPack,
+                category,
+                goalText,
+                captureMode: captureType,
+                milestoneLengthDays: 7,
+              });
+
+              setAuthSession({ token, user, journeyId: journey.id });
+              trackEvent("onboarding_apple_signup_success", { userId: user.id });
+              setStep("explainer");
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "something went wrong. try again.";
+              setSignupError(message.toLowerCase());
+              setSignupLoading(false);
+            }
+          }}
         />
       )}
 

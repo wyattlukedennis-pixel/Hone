@@ -8,7 +8,10 @@ import {
   type AuthUser,
   createSession,
   createUser,
+  deleteUser,
+  findUserByAppleId,
   findUserByEmail,
+  linkAppleId,
   revokeSession,
   toPublicUser
 } from "./repository.js";
@@ -25,6 +28,13 @@ type LoginBody = {
   password?: string;
 };
 
+type AppleAuthBody = {
+  appleUserId?: string;
+  email?: string;
+  displayName?: string;
+  identityToken?: string;
+};
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function normalizeEmail(input: string) {
@@ -39,6 +49,7 @@ function validateSignupBody(body: SignupBody) {
 
   if (!EMAIL_REGEX.test(email)) return { error: "INVALID_EMAIL" as const };
   if (password.length < 8) return { error: "PASSWORD_TOO_SHORT" as const };
+  if (password.length > 1000) return { error: "PASSWORD_TOO_LONG" as const };
   if (displayName && displayName.length > 80) return { error: "DISPLAY_NAME_TOO_LONG" as const };
 
   return { email, password, displayName };
@@ -58,8 +69,17 @@ function isUniqueViolation(error: unknown): error is { code: string } {
   return typeof error === "object" && error !== null && "code" in error && (error as { code: string }).code === "23505";
 }
 
+const authRateLimit = {
+  config: {
+    rateLimit: {
+      max: 10,
+      timeWindow: "1 minute"
+    }
+  }
+};
+
 export function registerAuthRoutes(app: FastifyInstance) {
-  app.post<{ Body: SignupBody }>("/auth/signup", async (request, reply) => {
+  app.post<{ Body: SignupBody }>("/auth/signup", { ...authRateLimit }, async (request, reply) => {
     if (!ensureDatabase(reply)) return;
 
     const validated = validateSignupBody(request.body ?? {});
@@ -107,7 +127,7 @@ export function registerAuthRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post<{ Body: LoginBody }>("/auth/login", async (request, reply) => {
+  app.post<{ Body: LoginBody }>("/auth/login", { ...authRateLimit }, async (request, reply) => {
     if (!ensureDatabase(reply)) return;
 
     const validated = validateLoginBody(request.body ?? {});
@@ -118,6 +138,11 @@ export function registerAuthRoutes(app: FastifyInstance) {
     const pool = getPool();
     const user = await findUserByEmail(pool, validated.email);
     if (!user) {
+      return reply.code(401).send({ error: "INVALID_CREDENTIALS" });
+    }
+
+    if (!user.passwordHash) {
+      // Apple-only account — no password set
       return reply.code(401).send({ error: "INVALID_CREDENTIALS" });
     }
 
@@ -162,5 +187,97 @@ export function registerAuthRoutes(app: FastifyInstance) {
     return reply.send({
       user: toPublicUser(auth.user)
     });
+  });
+
+  app.post<{ Body: AppleAuthBody }>("/auth/apple", { ...authRateLimit }, async (request, reply) => {
+    if (!ensureDatabase(reply)) return;
+
+    const appleUserId = typeof request.body?.appleUserId === "string" ? request.body.appleUserId.trim() : "";
+    const email = typeof request.body?.email === "string" ? normalizeEmail(request.body.email) : "";
+    const displayName = typeof request.body?.displayName === "string" ? request.body.displayName.trim() : null;
+
+    if (!appleUserId) {
+      return reply.code(400).send({ error: "APPLE_USER_ID_REQUIRED" });
+    }
+
+    const pool = getPool();
+
+    // Check if we already have a user with this Apple ID
+    const existingAppleUser = await findUserByAppleId(pool, appleUserId);
+    if (existingAppleUser) {
+      const expiresAt = new Date(Date.now() + config.auth.tokenTtlDays * 24 * 60 * 60 * 1000);
+      const session = await createSession(pool, { userId: existingAppleUser.id, expiresAt });
+      const token = signAuthToken({
+        userId: existingAppleUser.id,
+        sessionId: session.id,
+        email: existingAppleUser.email
+      });
+      return reply.send({
+        token,
+        expiresAt: session.expiresAt.toISOString(),
+        user: toPublicUser(existingAppleUser)
+      });
+    }
+
+    // Check if user exists by email — link Apple ID to existing account
+    if (email) {
+      const existingEmailUser = await findUserByEmail(pool, email);
+      if (existingEmailUser) {
+        await linkAppleId(pool, existingEmailUser.id, appleUserId);
+        const expiresAt = new Date(Date.now() + config.auth.tokenTtlDays * 24 * 60 * 60 * 1000);
+        const session = await createSession(pool, { userId: existingEmailUser.id, expiresAt });
+        const token = signAuthToken({
+          userId: existingEmailUser.id,
+          sessionId: session.id,
+          email: existingEmailUser.email
+        });
+        return reply.send({
+          token,
+          expiresAt: session.expiresAt.toISOString(),
+          user: toPublicUser(existingEmailUser)
+        });
+      }
+    }
+
+    // Create new user with Apple ID (no password needed)
+    const userEmail = email || `${appleUserId}@privaterelay.appleid.com`;
+    let user: AuthUser;
+    try {
+      user = await createUser(pool, {
+        email: userEmail,
+        passwordHash: null,
+        displayName: displayName && displayName.length > 0 ? displayName : null,
+        appleId: appleUserId
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return reply.code(409).send({ error: "EMAIL_TAKEN", message: "Email already in use." });
+      }
+      throw error;
+    }
+
+    const expiresAt = new Date(Date.now() + config.auth.tokenTtlDays * 24 * 60 * 60 * 1000);
+    const session = await createSession(pool, { userId: user.id, expiresAt });
+    const token = signAuthToken({
+      userId: user.id,
+      sessionId: session.id,
+      email: user.email
+    });
+
+    return reply.code(201).send({
+      token,
+      expiresAt: session.expiresAt.toISOString(),
+      user: toPublicUser(user)
+    });
+  });
+
+  app.delete("/auth/account", async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+
+    const pool = getPool();
+    await deleteUser(pool, auth.user.id);
+
+    return reply.send({ success: true });
   });
 }

@@ -12,8 +12,7 @@ export function signAuthToken(payload: AuthTokenPayload) {
   return jwt.sign(
     {
       sub: payload.userId,
-      sid: payload.sessionId,
-      email: payload.email
+      sid: payload.sessionId
     },
     config.auth.jwtSecret,
     {
@@ -29,10 +28,10 @@ export function verifyAuthToken(token: string): AuthTokenPayload | null {
 
     const userId = typeof decoded.sub === "string" ? decoded.sub : null;
     const sessionId = typeof decoded.sid === "string" ? decoded.sid : null;
-    const email = typeof decoded.email === "string" ? decoded.email : null;
-    if (!userId || !sessionId || !email) return null;
+    if (!userId || !sessionId) return null;
 
-    return { userId, sessionId, email };
+    // email is no longer stored in the token for privacy — pass empty string
+    return { userId, sessionId, email: "" };
   } catch {
     return null;
   }

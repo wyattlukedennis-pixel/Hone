@@ -1,8 +1,11 @@
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
+import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 
 import { registerAuthRoutes } from "./auth/routes.js";
+import { requireAuth } from "./auth/guard.js";
 import { registerClipRoutes } from "./clips/routes.js";
 import { config } from "./config.js";
 import { registerJourneyRoutes } from "./journeys/routes.js";
@@ -41,17 +44,40 @@ export function buildApp() {
     return reply.code(statusCode).send({ error: message });
   });
 
-  app.register(multipart);
-  app.register(fastifyStatic, {
+  // CORS
+  void app.register(cors, {
+    origin: config.cors.origin === "*" ? true : config.cors.origin.split(",").map((s) => s.trim()),
+    credentials: true
+  });
+
+  // Rate limiting
+  void app.register(rateLimit, {
+    global: false // only apply to specific routes via route options
+  });
+
+  void app.register(multipart, {
+    limits: {
+      fileSize: config.uploads.maxFileSizeBytes
+    }
+  });
+
+  void app.register(fastifyStatic, {
     root: config.uploads.dir,
-    prefix: "/media/"
+    prefix: "/media/",
+    decorateReply: false
+  });
+
+  // Protect media routes — require valid auth token
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/media/")) return;
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
   });
 
   app.get("/health", async () => {
     return {
       status: "ok",
       service: "hone-backend",
-      env: config.nodeEnv,
       now: new Date().toISOString()
     };
   });
@@ -60,7 +86,7 @@ export function buildApp() {
     return {
       service: "hone-backend",
       version: config.appVersion,
-      commit: config.commitSha
+      commit: config.isProduction ? undefined : config.commitSha
     };
   });
 

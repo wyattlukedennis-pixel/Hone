@@ -99,8 +99,11 @@ function dedupeClipOrder<T extends { id: string }>(clips: T[]) {
   return deduped;
 }
 
+import { config } from "../config.js";
+
 function getBaseUrl(protocol: string, host: string | undefined) {
-  const resolvedHost = host ?? "localhost:4000";
+  if (config.baseUrl) return config.baseUrl;
+  const resolvedHost = host ?? `localhost:${config.port}`;
   return `${protocol}://${resolvedHost}`;
 }
 

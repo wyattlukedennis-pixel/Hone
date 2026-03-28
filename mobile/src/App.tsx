@@ -5,7 +5,7 @@ import { ActivityIndicator, Animated, StyleSheet, Text, View } from "react-nativ
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { trackEvent } from "./analytics/events";
-import { fetchMe, login, logout, signup } from "./api/auth";
+import { appleAuth, deleteAccount, fetchMe, login, logout, signup } from "./api/auth";
 import { clearJourneyClips } from "./api/clips";
 import { listJourneys } from "./api/journeys";
 import { GlassSurface } from "./components/GlassSurface";
@@ -262,6 +262,36 @@ export default function App() {
     } finally {
       setAuthLoading(false);
     }
+  }
+
+  async function handleAppleAuth(result: { appleUserId: string; email: string | null; displayName: string | null; identityToken: string | null }) {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const authResult = await appleAuth(result);
+      await saveAuthToken(authResult.token);
+      setSession({ token: authResult.token, user: authResult.user });
+      void identifyUser(authResult.user.id);
+      trackEvent("apple_auth_success", { userId: authResult.user.id });
+      setTab("journeys");
+    } catch (error) {
+      setAuthError(toAuthErrorMessage(error));
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (!session) return;
+    try {
+      await deleteAccount(session.token);
+    } catch {
+      // Continue clearing local state even if the server call fails
+    }
+    await Promise.all([clearAuthToken(), clearActiveJourneyId()]);
+    setActiveJourneyId(null);
+    setSession(null);
+    setAuthMode("login");
   }
 
   async function handleActiveJourneyChange(journeyId: string | null) {
@@ -550,6 +580,7 @@ export default function App() {
         onHapticsModeChange={(next) => {
           void handleHapticsModeChange(next);
         }}
+        onDeleteAccount={handleDeleteAccount}
       />
     ) : null;
   }, [
@@ -622,6 +653,7 @@ export default function App() {
                   errorMessage={authError}
                   onModeChange={setAuthMode}
                   onSubmit={handleAuthSubmit}
+                  onAppleAuth={handleAppleAuth}
                 />
               ) : (
                 <OnboardingFlow

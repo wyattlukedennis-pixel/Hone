@@ -1,16 +1,26 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { theme } from "../../theme";
 import { TactilePressable } from "../../components/TactilePressable";
 import { triggerSelectionHaptic } from "../../utils/feedback";
+
+type AppleAuthResult = {
+  appleUserId: string;
+  email: string | null;
+  displayName: string | null;
+  identityToken: string | null;
+};
 
 interface Props {
   loading: boolean;
@@ -20,9 +30,10 @@ interface Props {
     password: string;
     displayName: string;
   }) => Promise<void>;
+  onAppleAuth?: (result: AppleAuthResult) => Promise<void>;
 }
 
-export function SignupScreen({ loading, errorMessage, onSubmit }: Props) {
+export function SignupScreen({ loading, errorMessage, onSubmit, onAppleAuth }: Props) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -96,6 +107,44 @@ export function SignupScreen({ loading, errorMessage, onSubmit }: Props) {
             )}
           </LinearGradient>
         </TactilePressable>
+
+        {Platform.OS === "ios" && onAppleAuth ? (
+          <>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={28}
+              style={styles.appleButton}
+              onPress={async () => {
+                try {
+                  const credential = await AppleAuthentication.signInAsync({
+                    requestedScopes: [
+                      AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                      AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                    ],
+                  });
+                  const dn = [credential.fullName?.givenName, credential.fullName?.familyName]
+                    .filter(Boolean)
+                    .join(" ") || null;
+                  await onAppleAuth({
+                    appleUserId: credential.user,
+                    email: credential.email,
+                    displayName: dn,
+                    identityToken: credential.identityToken,
+                  });
+                } catch (error: unknown) {
+                  const code = (error as { code?: string })?.code;
+                  if (code === "ERR_REQUEST_CANCELED") return;
+                }
+              }}
+            />
+          </>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -147,5 +196,26 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 18,
     fontWeight: "700",
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 4,
+    gap: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(0,0,0,0.08)",
+  },
+  dividerText: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  appleButton: {
+    height: 58,
+    marginTop: 8,
   },
 });

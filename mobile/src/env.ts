@@ -1,9 +1,10 @@
 import Constants from "expo-constants";
 import { NativeModules } from "react-native";
 
+const PRODUCTION_API_URL = "https://api.hone.app";
 const FALLBACK_API_BASE_URL = __DEV__
   ? "http://localhost:4000"
-  : "https://api.hone.app"; // placeholder — set EXPO_PUBLIC_API_BASE_URL for production
+  : PRODUCTION_API_URL;
 const appEnv = process.env.EXPO_PUBLIC_APP_ENV ?? "development";
 const DEFAULT_REVEAL_QUICK_SHARE_CAP_DAYS = 7;
 

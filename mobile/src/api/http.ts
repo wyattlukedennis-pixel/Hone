@@ -23,7 +23,7 @@ async function parseApiError(response: Response) {
   return payload?.error ?? payload?.message ?? `HTTP_${response.status}`;
 }
 
-export async function requestJson<T>(path: string, options: RequestOptions = {}) {
+export async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const candidates = env.apiBaseUrlCandidates.length ? env.apiBaseUrlCandidates : [env.apiBaseUrl];
   const headers: Record<string, string> = {};
   if (options.token) {
@@ -50,7 +50,7 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
     }
 
     if (response.status === 204) {
-      return undefined as T;
+      return undefined as unknown as T;
     }
 
     return (await response.json()) as T;
