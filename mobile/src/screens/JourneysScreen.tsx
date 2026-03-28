@@ -11,6 +11,7 @@ import { TactilePressable } from "../components/TactilePressable";
 import { readWeeklyProofCardDismissed, writeWeeklyProofCardDismissed } from "../storage/weeklyProofCardStorage";
 import { theme } from "../theme";
 import type { Clip } from "../types/clip";
+import type { Journey } from "../types/journey";
 import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
 import { formatDailyMomentTime, getDailyMomentKey, isInDailyMomentWindow } from "../utils/dailyMoment";
@@ -86,6 +87,7 @@ type JourneysScreenProps = {
   recordingsRevision: number;
   onRecordingsRevisionBump?: () => void;
   onMediaModeChange?: (mode: "video" | "photo") => void;
+  onJourneysLoaded?: (data: { journeys: Journey[]; clipsByJourney: Record<string, Clip[]>; updatingId: string | null }) => void;
 };
 
 export function JourneysScreen({
@@ -103,7 +105,8 @@ export function JourneysScreen({
   deepLinkRecorderJourneyId,
   recordingsRevision,
   onRecordingsRevisionBump,
-  onMediaModeChange
+  onMediaModeChange,
+  onJourneysLoaded
 }: JourneysScreenProps) {
   const reducedMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
@@ -174,6 +177,11 @@ export function JourneysScreen({
     onDevDateShiftSettingsChange,
     recordingsRevision
   });
+
+  // Push journey data up to App.tsx for ManageScreen
+  useEffect(() => {
+    onJourneysLoaded?.({ journeys, clipsByJourney, updatingId });
+  }, [journeys, clipsByJourney, updatingId, onJourneysLoaded]);
 
   // Sync mediaMode when active journey changes
   useEffect(() => {

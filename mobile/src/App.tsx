@@ -22,7 +22,10 @@ import { AuthScreen } from "./screens/AuthScreen";
 import { JourneysScreen } from "./screens/JourneysScreen";
 import { OnboardingFlow } from "./screens/onboarding/OnboardingFlow";
 import { ProgressScreen } from "./screens/ProgressScreen";
-import { SettingsScreen } from "./screens/SettingsScreen";
+import { ManageScreen } from "./screens/ManageScreen";
+import type { Clip } from "./types/clip";
+import type { Journey } from "./types/journey";
+// SettingsScreen is rendered inside ManageScreen
 import { clearActiveJourneyId, readActiveJourneyId, saveActiveJourneyId } from "./storage/activeJourneyStorage";
 import { readOnboardingComplete } from "./storage/onboardingStorage";
 import { clearAuthToken, readAuthToken, saveAuthToken } from "./storage/authStorage";
@@ -89,6 +92,9 @@ export default function App() {
   const [dailyMomentSettings, setDailyMomentSettings] = useState<DailyMomentSettings>(defaultDailyMomentSettings);
   const [hapticsMode, setHapticsMode] = useState<HapticsMode>(defaultHapticsMode);
   const [openRecorderSignal, setOpenRecorderSignal] = useState(0);
+  const [manageJourneys, setManageJourneys] = useState<Journey[]>([]);
+  const [manageClipsByJourney, setManageClipsByJourney] = useState<Record<string, Clip[]>>({});
+  const [manageUpdatingId, setManageUpdatingId] = useState<string | null>(null);
   const [deepLinkRecorderSignal, setDeepLinkRecorderSignal] = useState(0);
   const [deepLinkRecorderJourneyId, setDeepLinkRecorderJourneyId] = useState<string | null>(null);
   const [openRevealSignal, setOpenRevealSignal] = useState(0);
@@ -258,6 +264,7 @@ export default function App() {
   }
 
   async function handleActiveJourneyChange(journeyId: string | null) {
+    if (__DEV__) console.log("[App] handleActiveJourneyChange:", journeyId);
     setActiveJourneyId(journeyId);
     trackEvent("journey_opened", { journeyId });
     if (journeyId) {
@@ -445,6 +452,11 @@ export default function App() {
           recordingsRevision={recordingsRevision}
           onRecordingsRevisionBump={() => setRecordingsRevision((v) => v + 1)}
           onMediaModeChange={setMediaMode}
+          onJourneysLoaded={({ journeys, clipsByJourney, updatingId }) => {
+            setManageJourneys(journeys);
+            setManageClipsByJourney(clipsByJourney);
+            setManageUpdatingId(updatingId);
+          }}
         />
       ) : null;
   }, [
@@ -498,7 +510,26 @@ export default function App() {
 
   const settingsContent = useMemo(() => {
     return session ? (
-      <SettingsScreen
+      <ManageScreen
+        journeys={manageJourneys}
+        activeJourneyId={activeJourneyId}
+        clipsByJourney={manageClipsByJourney}
+        updatingId={manageUpdatingId}
+        onSetActive={(journeyId) => {
+          void handleActiveJourneyChange(journeyId);
+        }}
+        onRecord={(journeyId) => {
+          void handleActiveJourneyChange(journeyId);
+          setTab("journeys");
+          setOpenRecorderSignal((v) => v + 1);
+        }}
+        onArchive={() => {
+          // Handled by usePracticeState via JourneysScreen
+        }}
+        onOpenCreateJourney={() => {
+          setTab("journeys");
+          // The manage modal will open from Practice tab
+        }}
         user={session.user}
         onLogout={handleLogout}
         loggingOut={logoutLoading}
@@ -521,6 +552,10 @@ export default function App() {
     ) : null;
   }, [
     session,
+    manageJourneys,
+    activeJourneyId,
+    manageClipsByJourney,
+    manageUpdatingId,
     logoutLoading,
     devDateShiftSettings,
     dailyMomentSettings,

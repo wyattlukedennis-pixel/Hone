@@ -16,7 +16,7 @@ type TabBarProps = {
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "journeys", label: "practice" },
   { key: "progress", label: "progress" },
-  { key: "settings", label: "profile" }
+  { key: "settings", label: "manage" }
 ];
 
 export function TabBar({ activeTab, onSelect }: TabBarProps) {

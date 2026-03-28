@@ -99,6 +99,8 @@ export function usePracticeState({
   recordingsRevision
 }: UsePracticeStateParams) {
   const reducedMotion = useReducedMotion();
+  const activeJourneyIdRef = useRef(activeJourneyId);
+  activeJourneyIdRef.current = activeJourneyId;
   const [journeys, setJourneys] = useState<Journey[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -271,16 +273,22 @@ export function usePracticeState({
       const response = await listJourneys(token);
       setJourneys(response.journeys);
       const allJourneys = response.journeys;
+      const currentActiveId = activeJourneyIdRef.current;
+      if (__DEV__) console.log("[loadJourneys] currentActiveId:", currentActiveId, "journeys:", allJourneys.map(j => j.id).join(", "));
       if (allJourneys.length === 0) {
+        if (__DEV__) console.log("[loadJourneys] No journeys, clearing active");
         onActiveJourneyChange(null);
-      } else if (activeJourneyId) {
-        // Only override if we have a stored active journey that no longer exists
-        const activeStillExists = allJourneys.some((journey) => journey.id === activeJourneyId);
+      } else if (currentActiveId) {
+        const activeStillExists = allJourneys.some((journey) => journey.id === currentActiveId);
         if (!activeStillExists) {
+          if (__DEV__) console.log("[loadJourneys] Active journey gone, switching to first:", allJourneys[0].id);
           onActiveJourneyChange(allJourneys[0].id);
+        } else {
+          if (__DEV__) console.log("[loadJourneys] Active journey still exists, keeping");
         }
+      } else {
+        if (__DEV__) console.log("[loadJourneys] No activeId yet, not auto-selecting");
       }
-      // If activeJourneyId is null, don't auto-select — bootstrap will restore it from storage
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
     } finally {

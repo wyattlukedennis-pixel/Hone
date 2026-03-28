@@ -1,4 +1,5 @@
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+
 
 import { GlassSurface } from "../../components/GlassSurface";
 import { theme } from "../../theme";
@@ -176,7 +177,7 @@ export function ManageJourneysModal({
                 value={newTitle}
                 onChangeText={onTitleChange}
                 editable={!creating}
-                placeholderTextColor="#7b90ab"
+                placeholderTextColor="rgba(0,0,0,0.25)"
               />
               <TextInput
                 style={styles.input}
@@ -184,7 +185,7 @@ export function ManageJourneysModal({
                 value={newCategory}
                 onChangeText={onCategoryChange}
                 editable={!creating}
-                placeholderTextColor="#7b90ab"
+                placeholderTextColor="rgba(0,0,0,0.25)"
               />
               <TextInput
                 style={[styles.input, styles.goalInput]}
@@ -193,7 +194,7 @@ export function ManageJourneysModal({
                 onChangeText={onGoalTextChange}
                 editable={!creating}
                 multiline
-                placeholderTextColor="#7b90ab"
+                placeholderTextColor="rgba(0,0,0,0.25)"
               />
               <ActionButton
                 label="create journey"
@@ -274,7 +275,18 @@ export function ManageJourneysModal({
                         style={({ pressed }) => [styles.actionPillDanger, pressed ? styles.pressed : undefined, isBusy ? styles.actionDisabled : undefined]}
                         onPress={() => {
                           triggerSelectionHaptic();
-                          onArchive(journey.id);
+                          Alert.alert(
+                            "close journey?",
+                            `this will archive "${journey.title.toLowerCase()}" and all its recordings. you can't undo this.`,
+                            [
+                              { text: "cancel", style: "cancel" },
+                              {
+                                text: "close journey",
+                                style: "destructive",
+                                onPress: () => onArchive(journey.id),
+                              },
+                            ]
+                          );
                         }}
                         disabled={isBusy}
                       >
@@ -304,7 +316,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     borderRadius: PRACTICE_MODAL_RADIUS,
-    maxHeight: "84%",
+    maxHeight: "95%",
     padding: PRACTICE_MODAL_PADDING
   },
   header: {
@@ -338,7 +350,7 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   scrollContent: {
-    paddingBottom: 18,
+    paddingBottom: 60,
     gap: 10
   },
   createCard: {
@@ -381,8 +393,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   milestoneChipSelected: {
-    borderColor: "rgba(14,99,255,0.54)",
-    backgroundColor: "rgba(14,99,255,0.18)"
+    borderColor: "rgba(232,69,10,0.5)",
+    backgroundColor: "rgba(232,69,10,0.1)"
   },
   milestoneChipText: {
     color: theme.colors.textSecondary,
@@ -390,7 +402,7 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   milestoneChipTextSelected: {
-    color: theme.colors.accentStrong
+    color: theme.colors.accent
   },
   milestoneChipLocked: {
     opacity: 0.4,
@@ -426,8 +438,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7
   },
   captureModeChipSelected: {
-    borderColor: "rgba(14,99,255,0.54)",
-    backgroundColor: "rgba(14,99,255,0.18)"
+    borderColor: "rgba(232,69,10,0.5)",
+    backgroundColor: "rgba(232,69,10,0.1)"
   },
   captureModeChipText: {
     color: theme.colors.textSecondary,
@@ -435,7 +447,7 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   captureModeChipTextSelected: {
-    color: theme.colors.accentStrong
+    color: theme.colors.accent
   },
   input: {
     marginTop: 12,
@@ -481,8 +493,8 @@ const styles = StyleSheet.create({
     gap: 10
   },
   rowActive: {
-    backgroundColor: "rgba(14,99,255,0.14)",
-    borderColor: "rgba(14,99,255,0.40)"
+    backgroundColor: "rgba(232,69,10,0.08)",
+    borderColor: "rgba(232,69,10,0.35)"
   },
   rowBadge: {
     width: 38,
@@ -495,8 +507,8 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   rowBadgeActive: {
-    borderColor: "rgba(14,99,255,0.44)",
-    backgroundColor: "rgba(14,99,255,0.16)"
+    borderColor: "rgba(232,69,10,0.4)",
+    backgroundColor: "rgba(232,69,10,0.1)"
   },
   rowBadgeText: {
     color: theme.colors.textSecondary,
@@ -505,7 +517,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3
   },
   rowBadgeTextActive: {
-    color: theme.colors.accentStrong
+    color: theme.colors.accent
   },
   rowBody: {
     flex: 1
@@ -533,8 +545,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8
   },
   actionPillActive: {
-    borderColor: "rgba(14,99,255,0.42)",
-    backgroundColor: "rgba(14,99,255,0.14)"
+    borderColor: "rgba(232,69,10,0.35)",
+    backgroundColor: "rgba(232,69,10,0.08)"
   },
   actionPillPrimary: {
     borderRadius: 12,
@@ -560,7 +572,7 @@ const styles = StyleSheet.create({
     fontSize: 13
   },
   actionLabelActive: {
-    color: theme.colors.accentStrong
+    color: theme.colors.accent
   },
   actionLabelPrimary: {
     color: "#edf5ff",

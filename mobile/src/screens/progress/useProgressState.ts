@@ -91,10 +91,11 @@ export function useProgressState({
           onActiveJourneyChange(null);
           return;
         }
-        const modeJourneys = response.journeys.filter((journey) => journey.captureMode === mediaMode);
-        const activeExists = Boolean(activeJourneyId) && modeJourneys.some((journey) => journey.id === activeJourneyId);
-        if (!activeExists) {
-          onActiveJourneyChange(modeJourneys[0]?.id ?? null);
+        // Don't filter by mediaMode — show all journeys regardless of capture mode
+        // Don't auto-switch the active journey — let the user's selection stand
+        const activeExists = Boolean(activeJourneyId) && response.journeys.some((journey) => journey.id === activeJourneyId);
+        if (activeJourneyId && !activeExists) {
+          onActiveJourneyChange(response.journeys[0]?.id ?? null);
         }
       } catch (error) {
         setErrorMessage(toProgressErrorMessage(error));
