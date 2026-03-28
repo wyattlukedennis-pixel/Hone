@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install && npm run build --workspace=backend"
+buildCommand = "npm install && npm run build --workspace=backend && cp -r backend/src/db/migrations backend/dist/db/migrations"
 
 [deploy]
 startCommand = "npm run start --workspace=backend"
