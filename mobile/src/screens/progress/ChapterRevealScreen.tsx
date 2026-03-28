@@ -32,12 +32,13 @@ type ChapterRevealScreenProps = {
   onClose: () => void;
 };
 
-type Phase = "loading" | "intention" | "playing";
+type Phase = "loading" | "intention" | "playing" | "error";
 type SaveState = "idle" | "saving" | "saved";
 
 const ACCENT = "#E8450A";
 const VIDEO_RADIUS = 20;
 const MIN_LOADING_MS = 2500;
+const RESOLVE_TIMEOUT_MS = 30000;
 
 export default function ChapterRevealScreen({
   visible,
@@ -108,7 +109,11 @@ export default function ChapterRevealScreen({
   async function resolveVideo() {
     const startTime = Date.now();
     try {
-      const uri = await resolveReelUri(reelExportInput);
+      const uriPromise = resolveReelUri(reelExportInput);
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), RESOLVE_TIMEOUT_MS)
+      );
+      const uri = await Promise.race([uriPromise, timeoutPromise]);
       // Ensure minimum loading time for the morph animation
       const elapsed = Date.now() - startTime;
       if (elapsed < MIN_LOADING_MS) {
@@ -120,9 +125,11 @@ export default function ChapterRevealScreen({
         setPhase("playing");
       } else {
         if (__DEV__) console.warn("[ChapterReveal] No URI returned — check backend");
+        setPhase("error");
       }
     } catch (error) {
       if (__DEV__) console.error("[ChapterReveal] Resolve failed:", error);
+      setPhase("error");
     }
   }
 
@@ -228,6 +235,24 @@ export default function ChapterRevealScreen({
         <View style={styles.loadingContainer}>
           <LogoMorphLoader size={100} color={ACCENT} duration={900} />
           <Text style={styles.loadingText}>building your reveal...</Text>
+        </View>
+      ) : null}
+
+      {/* Error phase */}
+      {phase === "error" ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>couldn't build your reveal</Text>
+          <Text style={styles.errorSubtext}>try recording a few more clips first</Text>
+          <TactilePressable
+            style={styles.retryButton}
+            pressScale={0.96}
+            onPress={() => {
+              setPhase("loading");
+              void resolveVideo();
+            }}
+          >
+            <Text style={styles.retryButtonText}>try again</Text>
+          </TactilePressable>
         </View>
       ) : null}
 
@@ -391,6 +416,29 @@ const styles = StyleSheet.create({
     color: "rgba(0,0,0,0.3)",
     fontSize: 14,
     fontWeight: "600",
+  },
+  // Error phase
+  errorText: {
+    color: "#101010",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  errorSubtext: {
+    color: "rgba(0,0,0,0.35)",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  retryButton: {
+    marginTop: 12,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 22,
+    backgroundColor: ACCENT,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
   },
   // Playing phase
   content: {

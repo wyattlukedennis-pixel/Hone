@@ -111,6 +111,17 @@ function resolvePrimaryClip(input: ExportReelInput): { clip: Clip | null; source
       sourceKind: "fallback"
     };
   }
+  // Fall back to most recent sourceClip when no comparison/trailer exists yet.
+  const sourceClips = input.sourceClips ?? [];
+  if (sourceClips.length > 0) {
+    const sorted = [...sourceClips].sort(
+      (a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime()
+    );
+    return {
+      clip: sorted[0],
+      sourceKind: "fallback"
+    };
+  }
   return {
     clip: null,
     sourceKind: "none"
