@@ -29,6 +29,11 @@
     "plugins": [
       "expo-secure-store",
       "expo-apple-authentication"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "745ad4c9-13ae-4175-adbe-ea2262701204"
+      }
+    }
   }
 }

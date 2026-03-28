@@ -38,6 +38,7 @@ type CreateClipBody = {
   durationMs?: number;
   recordedAt?: string;
   recordedOn?: string;
+  captureType?: "video" | "photo";
 };
 
 function sanitizeExtension(input: string) {
@@ -194,6 +195,51 @@ export function registerClipRoutes(app: FastifyInstance) {
       durationMs: Math.round(durationMs),
       captureType: upload.captureType,
       videoUrl: `${baseUrl}/media/${upload.objectKey}`
+    });
+
+    return reply.code(201).send({ clip });
+  });
+
+  // Metadata-only clip creation — file stays on device, no server upload needed.
+  app.post<{ Params: JourneyParams; Body: CreateClipBody }>("/journeys/:journeyId/clips/local", async (request, reply) => {
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+
+    const pool = getPool();
+    const journey = await findJourneyByIdForUser(pool, {
+      journeyId: request.params.journeyId,
+      userId: auth.user.id
+    });
+    if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
+
+    const rawCaptureType = normalizeCaptureType(request.body?.captureType);
+    const captureType = rawCaptureType ?? journey.captureMode;
+
+    const rawDurationMs = Number(request.body?.durationMs ?? NaN);
+    const defaultDurationMs = captureType === "photo" ? 1000 : NaN;
+    const durationMs = Number.isFinite(rawDurationMs) ? rawDurationMs : defaultDurationMs;
+    if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 60_000) {
+      return reply.code(400).send({ error: "INVALID_DURATION_MS" });
+    }
+
+    const recordedAtRaw = typeof request.body?.recordedAt === "string" ? request.body.recordedAt : null;
+    const recordedAt = recordedAtRaw ? new Date(recordedAtRaw) : new Date();
+    if (Number.isNaN(recordedAt.getTime())) {
+      return reply.code(400).send({ error: "INVALID_RECORDED_AT" });
+    }
+    const normalizedRecordedOn = normalizeRecordedOn(request.body?.recordedOn);
+    if (request.body?.recordedOn !== undefined && !normalizedRecordedOn) {
+      return reply.code(400).send({ error: "INVALID_RECORDED_ON" });
+    }
+    const recordedOn = normalizedRecordedOn ?? recordedAt.toISOString().slice(0, 10);
+
+    const clip = await upsertClipFromUpload(pool, {
+      journeyId: journey.id,
+      recordedOn,
+      recordedAt,
+      durationMs: Math.round(durationMs),
+      captureType,
+      videoUrl: "local://device"
     });
 
     return reply.code(201).send({ clip });

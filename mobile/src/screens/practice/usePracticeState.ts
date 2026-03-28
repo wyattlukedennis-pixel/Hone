@@ -258,7 +258,7 @@ export function usePracticeState({
     }
   }
 
-  async function loadJourneys({ silent = false }: { silent?: boolean } = {}) {
+  async function loadJourneys({ silent = false, skipActiveSwitch = false }: { silent?: boolean; skipActiveSwitch?: boolean } = {}) {
     if (silent) {
       setRefreshing(true);
     } else {
@@ -269,22 +269,17 @@ export function usePracticeState({
     try {
       const response = await listJourneys(token);
       setJourneys(response.journeys);
-      const allJourneys = response.journeys;
-      const currentActiveId = activeJourneyIdRef.current;
-      if (__DEV__) console.log("[loadJourneys] currentActiveId:", currentActiveId, "journeys:", allJourneys.map(j => j.id).join(", "));
-      if (allJourneys.length === 0) {
-        if (__DEV__) console.log("[loadJourneys] No journeys, clearing active");
-        onActiveJourneyChange(null);
-      } else if (currentActiveId) {
-        const activeStillExists = allJourneys.some((journey) => journey.id === currentActiveId);
-        if (!activeStillExists) {
-          if (__DEV__) console.log("[loadJourneys] Active journey gone, switching to first:", allJourneys[0].id);
-          onActiveJourneyChange(allJourneys[0].id);
-        } else {
-          if (__DEV__) console.log("[loadJourneys] Active journey still exists, keeping");
+      if (!skipActiveSwitch) {
+        const allJourneys = response.journeys;
+        const currentActiveId = activeJourneyIdRef.current;
+        if (allJourneys.length === 0) {
+          onActiveJourneyChange(null);
+        } else if (currentActiveId) {
+          const activeStillExists = allJourneys.some((journey) => journey.id === currentActiveId);
+          if (!activeStillExists) {
+            onActiveJourneyChange(allJourneys[0].id);
+          }
         }
-      } else {
-        if (__DEV__) console.log("[loadJourneys] No activeId yet, not auto-selecting");
       }
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
@@ -343,6 +338,7 @@ export function usePracticeState({
   useEffect(() => {
     setClipsByJourney({});
     setClipsLoadingByJourney({});
+    void loadJourneys({ silent: true, skipActiveSwitch: true });
     if (activeJourneyId) {
       void loadJourneyClips(activeJourneyId);
     }

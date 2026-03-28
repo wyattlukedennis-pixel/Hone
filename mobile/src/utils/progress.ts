@@ -212,9 +212,14 @@ export function hasChapterClipToday(clips: Clip[], rule: ChapterCaptureRule, now
 
 export function getChapterStreak(clips: Clip[], rule: ChapterCaptureRule, now = new Date()) {
   const days = qualifiedDaySetFromRule(clips, rule);
-  let streak = 0;
   const cursor = new Date(now);
   cursor.setHours(0, 0, 0, 0);
+  // If no clip today, start counting from yesterday so the streak
+  // doesn't drop to 0 before the user has a chance to practice.
+  if (!days.has(dayKeyFromLocalDate(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
   while (days.has(dayKeyFromLocalDate(cursor))) {
     streak += 1;
     cursor.setDate(cursor.getDate() - 1);
@@ -244,9 +249,12 @@ export function getUnlockedMilestone(dayCount: number) {
 
 export function getCurrentStreak(clips: Clip[], now = new Date()) {
   const days = uniquePracticeDays(clips);
-  let streak = 0;
   const cursor = new Date(now);
   cursor.setHours(0, 0, 0, 0);
+  if (!days.has(dayKeyFromLocalDate(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
   while (days.has(dayKeyFromLocalDate(cursor))) {
     streak += 1;
     cursor.setDate(cursor.getDate() - 1);

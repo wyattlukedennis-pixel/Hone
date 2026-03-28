@@ -1,4 +1,5 @@
 import { env } from "../env";
+import { getAllClipLocalUris, clearLocalClipsForJourney } from "../storage/clipFileStore";
 import { requestJson } from "./http";
 import type { ClipResponse, ClipsResponse, UploadUrlResponse } from "../types/clip";
 
@@ -130,19 +131,41 @@ export function createClip(
   }));
 }
 
-export async function listClips(token: string, journeyId: string) {
-  const response = await requestJson<ClipsResponse>(`/journeys/${journeyId}/clips`, {
-    token
+/** Create a clip record on the backend without uploading a file. */
+export function createClipLocal(
+  token: string,
+  journeyId: string,
+  payload: { durationMs: number; recordedAt: string; recordedOn: string; captureType: "video" | "photo" }
+) {
+  return requestJson<ClipResponse>(`/journeys/${journeyId}/clips/local`, {
+    token,
+    method: "POST",
+    body: payload
   });
+}
+
+export async function listClips(token: string, journeyId: string) {
+  const [response, localUris] = await Promise.all([
+    requestJson<ClipsResponse>(`/journeys/${journeyId}/clips`, { token }),
+    getAllClipLocalUris()
+  ]);
   return {
     ...response,
-    clips: response.clips.map((clip) => normalizeClipMediaUrl(clip))
+    clips: response.clips.map((clip) => {
+      const localUri = localUris[clip.id];
+      if (localUri) {
+        return { ...clip, videoUrl: localUri };
+      }
+      return normalizeClipMediaUrl(clip);
+    })
   };
 }
 
-export function clearJourneyClips(token: string, journeyId: string) {
-  return requestJson<{ success: boolean; deletedCount: number }>(`/journeys/${journeyId}/clips`, {
+export async function clearJourneyClips(token: string, journeyId: string) {
+  const result = await requestJson<{ success: boolean; deletedCount: number }>(`/journeys/${journeyId}/clips`, {
     token,
     method: "DELETE"
   });
+  await clearLocalClipsForJourney(journeyId);
+  return result;
 }

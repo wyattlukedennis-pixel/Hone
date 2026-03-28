@@ -173,9 +173,11 @@ export function JourneysScreen({
   });
 
   // Push journey data up to App.tsx for ManageScreen
+  const onJourneysLoadedRef = useRef(onJourneysLoaded);
+  onJourneysLoadedRef.current = onJourneysLoaded;
   useEffect(() => {
-    onJourneysLoaded?.({ journeys, clipsByJourney, updatingId });
-  }, [journeys, clipsByJourney, updatingId, onJourneysLoaded]);
+    onJourneysLoadedRef.current?.({ journeys, clipsByJourney, updatingId });
+  }, [journeys, clipsByJourney, updatingId]);
 
   // Sync mediaMode when active journey changes
   useEffect(() => {
@@ -619,21 +621,9 @@ export function JourneysScreen({
                     >
                       {activeJourney.title.toLowerCase()}
                     </Text>
-                    <TactilePressable
-                      style={[
-                        styles.moreChip,
-                        compactMode ? styles.moreChipCompact : undefined,
-                        revealFocusMode ? styles.moreChipRevealFocus : undefined
-                      ]}
-                      onPress={() => {
-                        setManageOpen(true);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Manage journeys"
-                      accessibilityHint="Create, switch, and close journeys"
-                    >
-                      <Text style={styles.moreChipText}>manage</Text>
-                    </TactilePressable>
+                    <Text style={styles.heroCaptureEmoji}>
+                      {activeJourney.captureMode === "photo" ? "\uD83D\uDCF7" : "\uD83C\uDFA5"}
+                    </Text>
                   </View>
                   <Animated.View style={{ transform: [{ scale: statPulse }] }}>
                     <Text
@@ -1141,6 +1131,10 @@ const styles = StyleSheet.create({
     lineHeight: 52,
     fontWeight: "800",
     fontFamily: theme.typography.display
+  },
+  heroCaptureEmoji: {
+    fontSize: 24,
+    marginTop: 4,
   },
   skillNameCompact: {
     fontSize: 24,

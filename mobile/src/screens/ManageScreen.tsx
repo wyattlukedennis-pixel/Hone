@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { TactilePressable } from "../components/TactilePressable";
 import { theme } from "../theme";
@@ -11,21 +12,27 @@ import type { DailyMomentSettings } from "../types/dailyMoment";
 import type { DevDateShiftSettings } from "../types/devTools";
 import type { HapticsMode } from "../types/haptics";
 import { triggerSelectionHaptic } from "../utils/feedback";
-import { getCurrentStreak, getDayCount } from "../utils/progress";
-import { getSkillPackLabel } from "../utils/skillPack";
+import { getChapterStreak, getDayCount } from "../utils/progress";
+import { hasRevealExportPurchase } from "../utils/purchases";
 import { SettingsScreen } from "./SettingsScreen";
 
 export type ManageScreenProps = {
-  // Journey management (read-only list + set active)
   journeys: Journey[];
   activeJourneyId: string | null;
   clipsByJourney: Record<string, Clip[]>;
   updatingId: string | null;
   onSetActive: (journeyId: string) => void;
-  onRecord: (journeyId: string) => void;
+  onEditJourney: (journeyId: string, payload: {
+    title?: string;
+    milestoneLengthDays?: number;
+  }) => Promise<void>;
   onArchive: (journeyId: string) => void;
-  onOpenCreateJourney: () => void;
-  // Settings props
+  onCreateJourney: (payload: {
+    title: string;
+    captureMode: "video" | "photo";
+    milestoneLengthDays: number;
+  }) => Promise<void>;
+  creating: boolean;
   user: User;
   onLogout: () => Promise<void>;
   loggingOut: boolean;
@@ -47,9 +54,10 @@ export function ManageScreen({
   clipsByJourney,
   updatingId,
   onSetActive,
-  onRecord,
+  onEditJourney,
   onArchive,
-  onOpenCreateJourney,
+  onCreateJourney,
+  creating,
   user,
   onLogout,
   loggingOut,
@@ -66,6 +74,36 @@ export function ManageScreen({
 }: ManageScreenProps) {
   const insets = useSafeAreaInsets();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newCaptureMode, setNewCaptureMode] = useState<"video" | "photo">("video");
+  const [newMilestoneLengthDays, setNewMilestoneLengthDays] = useState(7);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editMilestoneLengthDays, setEditMilestoneLengthDays] = useState(7);
+  const [editSaving, setEditSaving] = useState(false);
+
+  const effectiveNow = (() => {
+    if (!devDateShiftSettings?.enabled || !devDateShiftSettings.dayOffset) return new Date();
+    const d = new Date();
+    d.setDate(d.getDate() + devDateShiftSettings.dayOffset);
+    return d;
+  })();
+
+  async function handleCreate() {
+    const title = newTitle.trim();
+    if (!title) return;
+    triggerSelectionHaptic();
+    await onCreateJourney({
+      title,
+      captureMode: newCaptureMode,
+      milestoneLengthDays: newMilestoneLengthDays,
+    });
+    setNewTitle("");
+    setNewCaptureMode("video");
+    setNewMilestoneLengthDays(7);
+    setShowCreateForm(false);
+  }
 
   return (
     <View style={styles.root}>
@@ -76,115 +114,368 @@ export function ManageScreen({
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>manage</Text>
+          <View>
+            <View style={styles.headerRail} />
+            <Text style={styles.title}>manage</Text>
+          </View>
           <TactilePressable
-            style={styles.gearButton}
+            style={styles.settingsButton}
             onPress={() => {
               triggerSelectionHaptic();
               setSettingsOpen(true);
             }}
           >
-            <Text style={styles.gearIcon}>{"⚙"}</Text>
+            <LinearGradient
+              colors={theme.gradients.topControlGhost}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <Text style={styles.settingsButtonText}>settings</Text>
           </TactilePressable>
         </View>
 
-        {/* Journey list */}
-        <Text style={styles.sectionKicker}>journeys</Text>
-
-        {journeys.length === 0 ? (
-          <Text style={styles.emptyText}>no journeys yet.</Text>
+        {/* Journey cards */}
+        {journeys.length === 0 && !showCreateForm ? (
+          <View style={styles.emptyCard}>
+            <LinearGradient
+              colors={theme.gradients.heroSurface}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <Text style={styles.emptyTitle}>no journeys yet</Text>
+            <Text style={styles.emptyBody}>tap below to start tracking your first skill.</Text>
+          </View>
         ) : null}
 
-        {journeys.map((journey) => {
+        {[...journeys].sort((a, b) => {
+          if (a.id === activeJourneyId) return -1;
+          if (b.id === activeJourneyId) return 1;
+          return 0;
+        }).map((journey) => {
           const isActive = activeJourneyId === journey.id;
           const isBusy = updatingId === journey.id;
+          const isEditing = editingId === journey.id;
           const journeyClips = clipsByJourney[journey.id] ?? [];
           const dayCount = getDayCount(journeyClips);
-          const streak = getCurrentStreak(journeyClips);
-          const badgeText = journey.title
-            .split(/\s+/)
-            .filter(Boolean)
-            .slice(0, 2)
-            .map((chunk) => chunk[0]?.toUpperCase() ?? "")
-            .join("") || "jr";
+          const streak = getChapterStreak(journeyClips, { captureMode: journey.captureMode }, effectiveNow);
+          const modeEmoji = journey.captureMode === "photo" ? "\uD83D\uDCF7" : "\uD83C\uDFA5";
 
           return (
-            <View key={journey.id} style={[styles.card, isActive ? styles.cardActive : undefined]}>
-              <View style={styles.cardRow}>
-                <View style={[styles.badge, isActive ? styles.badgeActive : undefined]}>
-                  <Text style={[styles.badgeText, isActive ? styles.badgeTextActive : undefined]}>{badgeText}</Text>
+            <View key={journey.id} style={styles.card}>
+              <LinearGradient
+                colors={isActive ? ["rgba(255,90,31,0.08)", "rgba(255,90,31,0.03)"] : theme.gradients.heroSurface}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
+              />
+              {isActive ? <View style={styles.activeIndicator} /> : null}
+
+              {/* Top row: title + emoji */}
+              <View style={styles.cardHeader}>
+                <View style={styles.cardTitleArea}>
+                  {isActive ? (
+                    <Text style={styles.cardKicker}>active journey</Text>
+                  ) : null}
+                  <Text style={styles.cardTitle} numberOfLines={2}>{journey.title.toLowerCase()}</Text>
                 </View>
+                <Text style={styles.modeEmoji}>{modeEmoji}</Text>
+              </View>
 
-                <View style={styles.cardBody}>
-                  <Text style={styles.cardTitle}>{journey.title.toLowerCase()}</Text>
-                  <Text style={styles.cardMeta}>
-                    {getSkillPackLabel(journey.skillPack).toLowerCase()} {"\u2022"} day {Math.max(dayCount, 1)} {"\u2022"} {streak}-day streak
+              {/* Stats row */}
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{Math.max(dayCount, 1)}</Text>
+                  <Text style={styles.statLabel}>day</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={[styles.statValue, streak >= 7 ? styles.statValueHot : undefined]}>
+                    {streak}
                   </Text>
+                  <Text style={styles.statLabel}>streak</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{journey.milestoneLengthDays}d</Text>
+                  <Text style={styles.statLabel}>chapter</Text>
+                </View>
+              </View>
 
-                  <View style={styles.actions}>
+              {isEditing ? (
+                <View style={styles.editForm}>
+                  <View style={styles.editSection}>
+                    <Text style={styles.fieldLabel}>title</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editTitle}
+                      onChangeText={setEditTitle}
+                      editable={!editSaving}
+                      placeholderTextColor="rgba(0,0,0,0.25)"
+                      autoFocus
+                      autoCapitalize="none"
+                      maxLength={120}
+                    />
+                  </View>
+                  <View style={styles.editSection}>
+                    <Text style={styles.fieldLabel}>chapter length</Text>
+                    <View style={styles.chipRow}>
+                      {[7, 14, 30, 100].map((length) => {
+                        const selected = editMilestoneLengthDays === length;
+                        const locked = length > 7 && !hasRevealExportPurchase();
+                        return (
+                          <TactilePressable
+                            key={length}
+                            style={[
+                              styles.chip,
+                              selected ? styles.chipSelected : undefined,
+                              locked ? styles.chipLocked : undefined,
+                            ]}
+                            onPress={() => {
+                              if (locked) return;
+                              triggerSelectionHaptic();
+                              setEditMilestoneLengthDays(length);
+                            }}
+                          >
+                            <Text style={[styles.chipText, selected ? styles.chipTextSelected : undefined, locked ? styles.chipTextLocked : undefined]}>
+                              {locked ? `\uD83D\uDD12 ${length}d` : `${length}d`}
+                            </Text>
+                          </TactilePressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={styles.editActions}>
                     <TactilePressable
-                      style={[
-                        styles.actionPill,
-                        isActive ? styles.actionPillActive : undefined,
-                        (isActive || isBusy) ? styles.actionDisabled : undefined,
-                      ]}
+                      style={styles.editCancelButton}
+                      onPress={() => {
+                        triggerSelectionHaptic();
+                        setEditingId(null);
+                      }}
+                    >
+                      <Text style={styles.editCancelText}>cancel</Text>
+                    </TactilePressable>
+                    <TactilePressable
+                      onPress={() => {
+                        triggerSelectionHaptic();
+                        const trimmed = editTitle.trim();
+                        if (!trimmed) return;
+                        const hasChanges =
+                          trimmed !== journey.title ||
+                          editMilestoneLengthDays !== journey.milestoneLengthDays;
+                        if (!hasChanges) {
+                          setEditingId(null);
+                          return;
+                        }
+                        setEditSaving(true);
+                        void onEditJourney(journey.id, {
+                          title: trimmed !== journey.title ? trimmed : undefined,
+                          milestoneLengthDays: editMilestoneLengthDays !== journey.milestoneLengthDays ? editMilestoneLengthDays : undefined,
+                        }).then(() => {
+                          setEditingId(null);
+                        }).finally(() => {
+                          setEditSaving(false);
+                        });
+                      }}
+                      disabled={editSaving || !editTitle.trim()}
+                    >
+                      <LinearGradient
+                        colors={theme.gradients.primaryAction}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={[styles.saveButton, (!editTitle.trim() || editSaving) && styles.buttonDisabled]}
+                      >
+                        <Text style={styles.saveButtonText}>{editSaving ? "saving..." : "save"}</Text>
+                      </LinearGradient>
+                    </TactilePressable>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.cardActions}>
+                  {!isActive ? (
+                    <TactilePressable
+                      style={[styles.actionButton, isBusy ? styles.buttonDisabled : undefined]}
                       onPress={() => {
                         triggerSelectionHaptic();
                         onSetActive(journey.id);
                       }}
-                      disabled={isActive || isBusy}
-                    >
-                      <Text style={[styles.actionLabel, isActive ? styles.actionLabelActive : undefined]}>
-                        {isActive ? "active" : "set active"}
-                      </Text>
-                    </TactilePressable>
-
-                    <TactilePressable
-                      style={[styles.actionPillPrimary, isBusy ? styles.actionDisabled : undefined]}
-                      onPress={() => {
-                        triggerSelectionHaptic();
-                        onRecord(journey.id);
-                      }}
                       disabled={isBusy}
                     >
-                      <Text style={styles.actionLabelPrimary}>record</Text>
+                      <LinearGradient
+                        colors={theme.gradients.primaryAction}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={[StyleSheet.absoluteFill, { borderRadius: 12 }]}
+                      />
+                      <Text style={styles.actionButtonTextPrimary}>set active</Text>
                     </TactilePressable>
-
-                    <TactilePressable
-                      style={[styles.actionPillDanger, isBusy ? styles.actionDisabled : undefined]}
-                      onPress={() => {
-                        triggerSelectionHaptic();
-                        Alert.alert(
-                          "close journey?",
-                          `this will archive "${journey.title.toLowerCase()}" and all its recordings. you can't undo this.`,
-                          [
-                            { text: "cancel", style: "cancel" },
-                            {
-                              text: "close journey",
-                              style: "destructive",
-                              onPress: () => onArchive(journey.id),
-                            },
-                          ]
-                        );
-                      }}
-                      disabled={isBusy}
-                    >
-                      <Text style={styles.actionLabelDanger}>{isBusy ? "closing..." : "close"}</Text>
-                    </TactilePressable>
-                  </View>
+                  ) : null}
+                  <TactilePressable
+                    style={[styles.actionButtonGhost, isBusy ? styles.buttonDisabled : undefined]}
+                    onPress={() => {
+                      triggerSelectionHaptic();
+                      setEditingId(journey.id);
+                      setEditTitle(journey.title);
+                      setEditMilestoneLengthDays(journey.milestoneLengthDays);
+                    }}
+                    disabled={isBusy}
+                  >
+                    <Text style={styles.actionButtonTextGhost}>edit</Text>
+                  </TactilePressable>
+                  <TactilePressable
+                    style={[styles.actionButtonDanger, isBusy ? styles.buttonDisabled : undefined]}
+                    onPress={() => {
+                      triggerSelectionHaptic();
+                      Alert.alert(
+                        "delete journey?",
+                        `this will permanently delete "${journey.title.toLowerCase()}" and all its recordings. you can't undo this.`,
+                        [
+                          { text: "cancel", style: "cancel" },
+                          {
+                            text: "delete",
+                            style: "destructive",
+                            onPress: () => onArchive(journey.id),
+                          },
+                        ]
+                      );
+                    }}
+                    disabled={isBusy}
+                  >
+                    <Text style={styles.actionButtonTextDanger}>{isBusy ? "deleting..." : "delete"}</Text>
+                  </TactilePressable>
                 </View>
-              </View>
+              )}
             </View>
           );
         })}
 
-        {/* Create new journey button */}
-        <TactilePressable style={styles.createButton} onPress={() => {
-          triggerSelectionHaptic();
-          onOpenCreateJourney();
-        }}>
-          <Text style={styles.createButtonText}>+ new journey</Text>
-        </TactilePressable>
+        {/* Create journey */}
+        {showCreateForm ? (
+          <View style={styles.card}>
+            <LinearGradient
+              colors={theme.gradients.heroSurface}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
+            />
+            <View style={styles.createFormHeader}>
+              <View style={styles.headerRail} />
+              <Text style={styles.createFormTitle}>new journey</Text>
+            </View>
+
+            <View style={styles.editSection}>
+              <Text style={styles.fieldLabel}>what are you practicing?</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., learning piano"
+                value={newTitle}
+                onChangeText={setNewTitle}
+                editable={!creating}
+                placeholderTextColor="rgba(0,0,0,0.25)"
+                autoFocus
+                autoCapitalize="none"
+                maxLength={120}
+              />
+            </View>
+
+            <View style={styles.editSection}>
+              <Text style={styles.fieldLabel}>capture mode</Text>
+              <View style={styles.chipRow}>
+                {([
+                  { key: "video" as const, label: "\uD83C\uDFA5 video" },
+                  { key: "photo" as const, label: "\uD83D\uDCF7 photo" },
+                ] as const).map((option) => {
+                  const selected = newCaptureMode === option.key;
+                  return (
+                    <TactilePressable
+                      key={option.key}
+                      style={[styles.chip, selected ? styles.chipSelected : undefined]}
+                      onPress={() => {
+                        triggerSelectionHaptic();
+                        setNewCaptureMode(option.key);
+                      }}
+                    >
+                      <Text style={[styles.chipText, selected ? styles.chipTextSelected : undefined]}>{option.label}</Text>
+                    </TactilePressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.editSection}>
+              <Text style={styles.fieldLabel}>first chapter length</Text>
+              <View style={styles.chipRow}>
+                {[7, 14, 30, 100].map((length) => {
+                  const selected = newMilestoneLengthDays === length;
+                  const locked = length > 7 && !hasRevealExportPurchase();
+                  return (
+                    <TactilePressable
+                      key={length}
+                      style={[
+                        styles.chip,
+                        selected ? styles.chipSelected : undefined,
+                        locked ? styles.chipLocked : undefined,
+                      ]}
+                      onPress={() => {
+                        if (locked) return;
+                        triggerSelectionHaptic();
+                        setNewMilestoneLengthDays(length);
+                      }}
+                    >
+                      <Text style={[styles.chipText, selected ? styles.chipTextSelected : undefined, locked ? styles.chipTextLocked : undefined]}>
+                        {locked ? `\uD83D\uDD12 ${length}d` : `${length}d`}
+                      </Text>
+                    </TactilePressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.editActions}>
+              <TactilePressable
+                style={styles.editCancelButton}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  setShowCreateForm(false);
+                  setNewTitle("");
+                }}
+              >
+                <Text style={styles.editCancelText}>cancel</Text>
+              </TactilePressable>
+              <TactilePressable
+                onPress={() => { void handleCreate(); }}
+                disabled={creating || !newTitle.trim()}
+              >
+                <LinearGradient
+                  colors={theme.gradients.primaryAction}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.saveButton, (!newTitle.trim() || creating) && styles.buttonDisabled]}
+                >
+                  <Text style={styles.saveButtonText}>{creating ? "creating..." : "create journey"}</Text>
+                </LinearGradient>
+              </TactilePressable>
+            </View>
+          </View>
+        ) : (
+          <TactilePressable
+            style={styles.newJourneyButton}
+            onPress={() => {
+              triggerSelectionHaptic();
+              setShowCreateForm(true);
+            }}
+          >
+            <LinearGradient
+              colors={theme.gradients.heroSurface}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
+            />
+            <Text style={styles.newJourneyPlus}>+</Text>
+            <Text style={styles.newJourneyText}>new journey</Text>
+          </TactilePressable>
+        )}
       </ScrollView>
 
       {/* Settings Modal */}
@@ -230,163 +521,333 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    gap: 10,
+    paddingHorizontal: 18,
+    paddingTop: 4,
+    gap: 14,
   },
+  // Header
   header: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
   },
+  headerRail: {
+    width: 42,
+    height: 4.5,
+    borderRadius: 0,
+    backgroundColor: theme.colors.accent,
+    marginBottom: 6,
+  },
   title: {
-    fontSize: 36,
+    fontSize: 38,
+    fontWeight: "800",
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display,
+    letterSpacing: -0.5,
+  },
+  settingsButton: {
+    marginTop: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    overflow: "hidden",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  settingsButtonText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: theme.colors.textSecondary,
+    letterSpacing: 0.2,
+    fontFamily: theme.typography.label,
+  },
+  // Empty state
+  emptyCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    overflow: "hidden",
+    padding: 24,
+    alignItems: "center",
+    gap: 6,
+  },
+  emptyTitle: {
+    fontSize: 20,
     fontWeight: "800",
     color: theme.colors.textPrimary,
     fontFamily: theme.typography.display,
   },
-  gearButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  gearIcon: {
-    fontSize: 24,
-  },
-  sectionKicker: {
-    marginTop: 4,
-    color: theme.colors.textSecondary,
-    fontWeight: "700",
-    fontSize: 12,
-    letterSpacing: 0.15,
-    fontFamily: theme.typography.label,
-  },
-  emptyText: {
+  emptyBody: {
+    fontSize: 14,
     color: theme.colors.textSecondary,
     fontFamily: theme.typography.body,
+    textAlign: "center",
   },
+  // Journey card
   card: {
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.06)",
-    backgroundColor: "rgba(255,255,255,0.4)",
-    padding: 12,
+    overflow: "hidden",
+    padding: 18,
+    gap: 14,
   },
-  cardActive: {
-    borderColor: "rgba(232,69,10,0.35)",
-    backgroundColor: "rgba(232,69,10,0.08)",
+  activeIndicator: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3.5,
+    backgroundColor: theme.colors.accent,
   },
-  cardRow: {
+  cardHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 10,
   },
-  badge: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.06)",
-    backgroundColor: "rgba(255,255,255,0.3)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badgeActive: {
-    borderColor: "rgba(232,69,10,0.4)",
-    backgroundColor: "rgba(232,69,10,0.1)",
-  },
-  badgeText: {
-    color: theme.colors.textSecondary,
-    fontWeight: "800",
-    fontSize: 11,
-    letterSpacing: 0.3,
-  },
-  badgeTextActive: {
-    color: theme.colors.accent,
-  },
-  cardBody: {
+  cardTitleArea: {
     flex: 1,
   },
+  cardKicker: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: theme.colors.accent,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label,
+    marginBottom: 2,
+  },
   cardTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display,
+    lineHeight: 28,
+  },
+  modeEmoji: {
+    fontSize: 20,
+    marginTop: 2,
+  },
+  // Stats
+  statsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.03)",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.04)",
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: "center",
+    gap: 1,
+  },
+  statValue: {
     fontSize: 18,
     fontWeight: "800",
     color: theme.colors.textPrimary,
     fontFamily: theme.typography.heading,
   },
-  cardMeta: {
-    marginTop: 2,
-    color: theme.colors.textSecondary,
-    fontFamily: theme.typography.body,
+  statValueHot: {
+    color: theme.colors.accent,
   },
-  actions: {
-    marginTop: 8,
+  statLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: theme.colors.textSecondary,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.2,
+    opacity: 0.6,
+  },
+  statDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: "rgba(0,0,0,0.08)",
+  },
+  // Card actions
+  cardActions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-  actionPill: {
+  actionButton: {
     borderRadius: 12,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+  },
+  actionButtonTextPrimary: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#fff",
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.2,
+  },
+  actionButtonGhost: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(255,255,255,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+  },
+  actionButtonTextGhost: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.colors.textSecondary,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.2,
+  },
+  actionButtonDanger: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(203,31,31,0.15)",
+    backgroundColor: "rgba(203,31,31,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+  },
+  actionButtonTextDanger: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.colors.danger,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.2,
+    opacity: 0.8,
+  },
+  buttonDisabled: {
+    opacity: 0.45,
+  },
+  // Edit form
+  editForm: {
+    gap: 12,
+  },
+  editSection: {
+    gap: 6,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.textSecondary,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+    fontFamily: theme.typography.label,
+    opacity: 0.6,
+  },
+  input: {
+    backgroundColor: "rgba(255,255,255,0.6)",
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.06)",
-    backgroundColor: "rgba(255,255,255,0.26)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 16,
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.body,
   },
-  actionPillActive: {
-    borderColor: "rgba(232,69,10,0.35)",
-    backgroundColor: "rgba(232,69,10,0.08)",
+  chipRow: {
+    flexDirection: "row",
+    gap: 8,
   },
-  actionPillPrimary: {
-    borderRadius: 12,
+  chip: {
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.30)",
-    backgroundColor: theme.colors.accent,
-    paddingHorizontal: 12,
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(255,255,255,0.5)",
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  actionPillDanger: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(214,69,93,0.42)",
-    backgroundColor: "rgba(214,69,93,0.12)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  chipSelected: {
+    borderColor: "rgba(255,90,31,0.4)",
+    backgroundColor: "rgba(255,90,31,0.1)",
   },
-  actionLabel: {
+  chipLocked: {
+    opacity: 0.35,
+  },
+  chipText: {
     color: theme.colors.textSecondary,
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 13,
+    fontFamily: theme.typography.label,
   },
-  actionLabelActive: {
+  chipTextSelected: {
     color: theme.colors.accent,
   },
-  actionLabelPrimary: {
-    color: "#edf5ff",
-    fontWeight: "800",
-    fontSize: 13,
+  chipTextLocked: {
+    color: "rgba(0,0,0,0.25)",
   },
-  actionLabelDanger: {
-    color: theme.colors.danger,
-    fontWeight: "700",
-    fontSize: 13,
+  editActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 2,
   },
-  actionDisabled: {
-    opacity: 0.62,
-  },
-  createButton: {
-    marginTop: 6,
-    alignSelf: "flex-start",
+  editCancelButton: {
     paddingVertical: 10,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
   },
-  createButtonText: {
+  editCancelText: {
     color: theme.colors.textSecondary,
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 15,
     fontFamily: theme.typography.label,
+    opacity: 0.7,
+  },
+  saveButton: {
+    borderRadius: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saveButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.2,
+  },
+  // Create form
+  createFormHeader: {
+    gap: 4,
+  },
+  createFormTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display,
+  },
+  // New journey button
+  newJourneyButton: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    overflow: "hidden",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 16,
+  },
+  newJourneyPlus: {
+    fontSize: 22,
+    fontWeight: "300",
+    color: theme.colors.accent,
+    marginTop: -1,
+  },
+  newJourneyText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: theme.colors.textSecondary,
+    fontFamily: theme.typography.label,
+    letterSpacing: 0.2,
   },
   // Settings modal
   settingsBackdrop: {

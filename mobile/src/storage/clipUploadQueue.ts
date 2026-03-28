@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { createClip, requestClipUploadUrl, uploadClipFile } from "../api/clips";
+import { createClipLocal } from "../api/clips";
+import { persistClipFile, registerClipLocalUri } from "./clipFileStore";
 
 const CLIP_UPLOAD_QUEUE_KEY = "hone.clips.uploadQueue.v1";
 const MAX_RETRY_BACKOFF_MS = 3 * 60 * 1000;
@@ -66,50 +67,6 @@ function toLocalDayKey(value: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function inferUploadMedia(fileUri: string, captureType: "video" | "photo") {
-  const normalized = fileUri.split("?")[0].toLowerCase();
-  if (captureType === "photo") {
-    if (normalized.endsWith(".png")) {
-      return {
-        mimeType: "image/png",
-        fileExtension: "png",
-        fileName: "clip.png"
-      };
-    }
-    if (normalized.endsWith(".heic") || normalized.endsWith(".heif")) {
-      return {
-        mimeType: "image/heic",
-        fileExtension: "heic",
-        fileName: "clip.heic"
-      };
-    }
-    return {
-      mimeType: "image/jpeg",
-      fileExtension: "jpg",
-      fileName: "clip.jpg"
-    };
-  }
-
-  if (normalized.endsWith(".mov") || normalized.endsWith(".qt")) {
-    return {
-      mimeType: "video/quicktime",
-      fileExtension: "mov",
-      fileName: "clip.mov"
-    };
-  }
-  if (normalized.endsWith(".m4v")) {
-    return {
-      mimeType: "video/x-m4v",
-      fileExtension: "m4v",
-      fileName: "clip.m4v"
-    };
-  }
-  return {
-    mimeType: "video/mp4",
-    fileExtension: "mp4",
-    fileName: "clip.mp4"
-  };
-}
 
 function withQueueLock<T>(task: () => Promise<T>) {
   let release!: () => void;
@@ -253,7 +210,6 @@ export async function processClipUploadQueue(token: string, options: ProcessQueu
       };
 
       try {
-        const media = inferUploadMedia(item.fileUri, item.captureType);
         await updateItem({
           status: "uploading",
           lastAttemptAt: new Date().toISOString(),
@@ -261,20 +217,8 @@ export async function processClipUploadQueue(token: string, options: ProcessQueu
         });
         emit({ type: "status", itemId: item.id, journeyId: item.journeyId, status: "uploading" });
 
-        const upload = await requestClipUploadUrl(token, item.journeyId, {
-          mimeType: media.mimeType,
-          fileExtension: media.fileExtension,
-          captureType: item.captureType
-        });
-
-        await uploadClipFile({
-          token,
-          uploadUrl: upload.uploadUrl,
-          fileField: upload.fileField,
-          fileUri: item.fileUri,
-          mimeType: media.mimeType,
-          fileName: media.fileName
-        });
+        // Save file to permanent local storage
+        const localUri = await persistClipFile(item.fileUri, item.journeyId, item.captureType);
 
         await updateItem({ status: "uploaded" });
         emit({ type: "status", itemId: item.id, journeyId: item.journeyId, status: "uploaded" });
@@ -282,13 +226,16 @@ export async function processClipUploadQueue(token: string, options: ProcessQueu
         await updateItem({ status: "processing" });
         emit({ type: "status", itemId: item.id, journeyId: item.journeyId, status: "processing" });
 
-        await createClip(token, item.journeyId, {
-          uploadId: upload.uploadId,
+        // Create metadata record on backend (no file upload)
+        const response = await createClipLocal(token, item.journeyId, {
           durationMs: item.durationMs,
           recordedAt: item.recordedAt,
           recordedOn: item.recordedOn,
           captureType: item.captureType
         });
+
+        // Map the server-assigned clip ID to the local file
+        await registerClipLocalUri(response.clip.id, localUri);
 
         await updateItem({ status: "ready" });
         emit({ type: "status", itemId: item.id, journeyId: item.journeyId, status: "ready" });

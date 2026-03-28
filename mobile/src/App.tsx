@@ -7,7 +7,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { trackEvent } from "./analytics/events";
 import { appleAuth, deleteAccount, fetchMe, login, logout, signup } from "./api/auth";
 import { clearJourneyClips } from "./api/clips";
-import { listJourneys } from "./api/journeys";
+import { archiveJourney, createJourney, listJourneys, updateJourney } from "./api/journeys";
 import { GlassSurface } from "./components/GlassSurface";
 import { TabBar } from "./components/TabBar";
 import { env } from "./env";
@@ -95,6 +95,10 @@ export default function App() {
   const [manageJourneys, setManageJourneys] = useState<Journey[]>([]);
   const [manageClipsByJourney, setManageClipsByJourney] = useState<Record<string, Clip[]>>({});
   const [manageUpdatingId, setManageUpdatingId] = useState<string | null>(null);
+  const [manageCreating, setManageCreating] = useState(false);
+  const manageLocalEditsRef = useRef<Record<string, Partial<Journey>>>({}); // journeyId → edited fields
+  const manageLocalDeletesRef = useRef<Set<string>>(new Set());
+  const manageLocalCreatesRef = useRef<Journey[]>([]);
   const [progressFullscreen, setProgressFullscreen] = useState(false);
   const [deepLinkRecorderSignal, setDeepLinkRecorderSignal] = useState(0);
   const [deepLinkRecorderJourneyId, setDeepLinkRecorderJourneyId] = useState<string | null>(null);
@@ -292,6 +296,9 @@ export default function App() {
     setActiveJourneyId(null);
     setSession(null);
     setAuthMode("login");
+    manageLocalEditsRef.current = {};
+    manageLocalDeletesRef.current = new Set();
+    manageLocalCreatesRef.current = [];
   }
 
   async function handleActiveJourneyChange(journeyId: string | null) {
@@ -318,6 +325,9 @@ export default function App() {
       setSession(null);
       setAuthMode("login");
       setLogoutLoading(false);
+      manageLocalEditsRef.current = {};
+    manageLocalDeletesRef.current = new Set();
+    manageLocalCreatesRef.current = [];
     }
   }
 
@@ -484,7 +494,35 @@ export default function App() {
           onRecordingsRevisionBump={() => setRecordingsRevision((v) => v + 1)}
           onMediaModeChange={setMediaMode}
           onJourneysLoaded={({ journeys, clipsByJourney, updatingId }) => {
-            setManageJourneys(journeys);
+            const deletes = manageLocalDeletesRef.current;
+            const edits = manageLocalEditsRef.current;
+            const creates = manageLocalCreatesRef.current;
+            // Filter out locally deleted, apply local edits, prepend local creates
+            let merged = journeys
+              .filter((j) => !deletes.has(j.id))
+              .map((j) => (edits[j.id] ? { ...j, ...edits[j.id] } : j));
+            // Add locally created journeys that aren't yet in the server response
+            const serverIds = new Set(merged.map((j) => j.id));
+            const newCreates = creates.filter((j) => !serverIds.has(j.id));
+            if (newCreates.length > 0) {
+              merged = [...newCreates, ...merged];
+            }
+            // Clear overrides for items the server now reflects correctly
+            for (const id of Object.keys(edits)) {
+              const serverJ = journeys.find((j) => j.id === id);
+              if (serverJ) {
+                const edit = edits[id];
+                const allMatch = Object.entries(edit).every(
+                  ([k, v]) => (serverJ as Record<string, unknown>)[k] === v
+                );
+                if (allMatch) delete edits[id];
+              }
+            }
+            for (const id of deletes) {
+              if (!journeys.find((j) => j.id === id)) deletes.delete(id);
+            }
+            manageLocalCreatesRef.current = creates.filter((j) => !serverIds.has(j.id) || deletes.has(j.id));
+            setManageJourneys(merged);
             setManageClipsByJourney(clipsByJourney);
             setManageUpdatingId(updatingId);
           }}
@@ -550,18 +588,56 @@ export default function App() {
         onSetActive={(journeyId) => {
           void handleActiveJourneyChange(journeyId);
         }}
-        onRecord={(journeyId) => {
-          void handleActiveJourneyChange(journeyId);
-          setTab("journeys");
-          setOpenRecorderSignal((v) => v + 1);
+        onEditJourney={async (journeyId, payload) => {
+          if (!session) return;
+          const { journey } = await updateJourney(session.token, journeyId, payload);
+          manageLocalEditsRef.current[journeyId] = payload;
+          setManageJourneys((prev) =>
+            prev.map((j) => (j.id === journeyId ? journey : j))
+          );
+          setRecordingsRevision((v) => v + 1);
         }}
-        onArchive={() => {
-          // Handled by usePracticeState via JourneysScreen
+        onArchive={(journeyId) => {
+          void (async () => {
+            if (!session) return;
+                        try {
+              await archiveJourney(session.token, journeyId);
+              manageLocalDeletesRef.current.add(journeyId);
+              setManageJourneys((prev) => prev.filter((j) => j.id !== journeyId));
+              setManageClipsByJourney((prev) => {
+                const next = { ...prev };
+                delete next[journeyId];
+                return next;
+              });
+              if (activeJourneyId === journeyId) {
+                void handleActiveJourneyChange(null);
+              }
+              setRecordingsRevision((v) => v + 1);
+            } catch (error) {
+                            if (__DEV__) console.error("[App] archiveJourney error:", error);
+            }
+          })();
         }}
-        onOpenCreateJourney={() => {
-          setTab("journeys");
-          // The manage modal will open from Practice tab
+        onCreateJourney={async (payload) => {
+          if (!session) return;
+                    setManageCreating(true);
+          try {
+            const { journey } = await createJourney(session.token, {
+              title: payload.title,
+              skillPack: "fitness",
+              captureMode: payload.captureMode,
+              milestoneLengthDays: payload.milestoneLengthDays,
+            });
+            manageLocalCreatesRef.current = [journey, ...manageLocalCreatesRef.current];
+            setManageJourneys((prev) => [journey, ...prev]);
+            void handleActiveJourneyChange(journey.id);
+            setRecordingsRevision((v) => v + 1);
+          } catch {
+                      } finally {
+            setManageCreating(false);
+          }
         }}
+        creating={manageCreating}
         user={session.user}
         onLogout={handleLogout}
         loggingOut={logoutLoading}
@@ -589,6 +665,7 @@ export default function App() {
     activeJourneyId,
     manageClipsByJourney,
     manageUpdatingId,
+    manageCreating,
     logoutLoading,
     devDateShiftSettings,
     dailyMomentSettings,
