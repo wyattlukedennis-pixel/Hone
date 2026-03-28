@@ -5,8 +5,6 @@ import * as Sharing from "expo-sharing";
 import { requestJson } from "../api/http";
 import type { Clip } from "../types/clip";
 import type { ChapterTrailerMoment } from "./progress";
-import { buildTikTokReelClips } from "./reelBuilder";
-import { composeReel } from "./reelComposer";
 
 export type ExportReelInput = {
   chapterNumber: number;
@@ -252,37 +250,10 @@ async function tryResolveRenderedReelAsset(input: ExportReelInput): Promise<{ as
   }
 }
 
-async function resolveLocalComposedReel(input: ExportReelInput): Promise<ResolvedReelAsset | null> {
-  if (!input.token || !input.journeyId) return null;
-  try {
-    const reelClips = await buildTikTokReelClips(input.token, input.journeyId);
-    if (reelClips.length < 2) return null;
-    const outputPath = await composeReel(reelClips);
-    if (!outputPath) return null;
-    return {
-      uri: outputPath,
-      mimeType: "video/mp4",
-      captureType: "video",
-      cacheKey: `local-compose-${Date.now()}`,
-      sourceKind: "rendered",
-      cacheHit: false
-    };
-  } catch (error) {
-    if (__DEV__) console.error("[reelExport] Local composition failed:", error);
-    return null;
-  }
-}
-
 async function resolveReelAsset(input: ExportReelInput): Promise<ResolvedReelAsset | null> {
   const renderedAsset = await resolveRenderedReelAsset(input);
   if (renderedAsset) {
     return renderedAsset;
-  }
-
-  // Try client-side FFmpeg composition with local clips
-  const composedAsset = await resolveLocalComposedReel(input);
-  if (composedAsset) {
-    return composedAsset;
   }
 
   const primaryClipResult = resolvePrimaryClip(input);
@@ -324,18 +295,6 @@ export async function prepareReelAsset(input: ExportReelInput): Promise<ExportRe
       code: "ok",
       sourceKind: renderedAttempt.asset.sourceKind,
       cacheHit: renderedAttempt.asset.cacheHit
-    };
-  }
-
-  // Try client-side FFmpeg composition with local clips
-  const composedAsset = await resolveLocalComposedReel(input);
-  if (composedAsset) {
-    return {
-      success: true,
-      message: "Reel composed locally.",
-      code: "ok",
-      sourceKind: "rendered",
-      cacheHit: false
     };
   }
 

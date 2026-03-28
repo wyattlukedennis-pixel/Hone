@@ -206,7 +206,6 @@ export function ComparisonRevealModal({
   const [reelPreviewVisible, setReelPreviewVisible] = useState(false);
   const [composedDaySpan, setComposedDaySpan] = useState(0);
   const [composing, setComposing] = useState(false);
-  const [composedReelUri, setComposedReelUri] = useState<string | null>(null);
   const stageReveal = useRef(new Animated.Value(0)).current;
   const unlockPulse = useRef(new Animated.Value(1)).current;
   const presentOpen = useRef(new Animated.Value(0)).current;
@@ -420,7 +419,6 @@ export function ComparisonRevealModal({
     setQuickShareCapLoaded(false);
     setQuickShareCapReached(false);
     setReelPreviewVisible(false);
-    setComposedReelUri(null);
     openingFinishedRef.current = false;
     if (openingTimerRef.current) {
       clearTimeout(openingTimerRef.current);
@@ -441,21 +439,12 @@ export function ComparisonRevealModal({
       useNativeDriver: true
     }).start();
 
-    // Auto-compose reel when entryStage is "reel"
+    // Auto-reveal reel stage after loading spinner when entryStage is "reel"
     if (entryStage === "reel") {
       setComposing(true);
-      setComposedReelUri(null);
-      const minDelay = new Promise((r) => setTimeout(r, 2200));
-      void (async () => {
-        try {
-          const [uri] = await Promise.all([resolveReelUri(reelExportInput), minDelay]);
-          setComposedReelUri(uri);
-          setComposedDaySpan(progressDays);
-        } catch {
-          // Fall through — composing will end and reel stage shows
-        }
+      setTimeout(() => {
         setComposing(false);
-      })();
+      }, 2200);
     }
   }, [visible, entryStage]);
 
@@ -697,7 +686,7 @@ export function ComparisonRevealModal({
   }, [stage, visible, reducedMotion, summaryHeroReveal, summaryMetricsReveal, summaryActionsReveal, chapterNumber]);
 
   useEffect(() => {
-    if (stage !== "reel" || !visible || !reelCards.length || !reelPlaying || composedReelUri) {
+    if (stage !== "reel" || !visible || !reelCards.length || !reelPlaying) {
       if (reelTimerRef.current) {
         clearInterval(reelTimerRef.current);
         reelTimerRef.current = null;
@@ -1380,9 +1369,9 @@ export function ComparisonRevealModal({
               <View style={styles.reelStage}>
                 <View style={styles.reelVideoWrap}>
                   <LoopingVideoPlayer
-                    uri={composedReelUri ?? reelCards[reelIndex]?.clip.videoUrl ?? reelCards[0].clip.videoUrl}
-                    mediaType={composedReelUri ? "video" : (reelCards[reelIndex]?.clip.captureType ?? reelCards[0].clip.captureType)}
-                    posterUri={composedReelUri ? null : (reelCards[reelIndex]?.clip.thumbnailUrl ?? reelCards[0].clip.thumbnailUrl)}
+                    uri={reelCards[reelIndex]?.clip.videoUrl ?? reelCards[0].clip.videoUrl}
+                    mediaType={reelCards[reelIndex]?.clip.captureType ?? reelCards[0].clip.captureType}
+                    posterUri={reelCards[reelIndex]?.clip.thumbnailUrl ?? reelCards[0].clip.thumbnailUrl}
                     style={[styles.reelVideo, { height: reelVideoHeight }]}
                     resizeMode={ResizeMode.COVER}
                     showControls
