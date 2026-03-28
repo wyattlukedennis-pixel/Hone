@@ -5,7 +5,6 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 
 import { registerAuthRoutes } from "./auth/routes.js";
-import { requireAuth } from "./auth/guard.js";
 import { registerClipRoutes } from "./clips/routes.js";
 import { config } from "./config.js";
 import { registerJourneyRoutes } from "./journeys/routes.js";
@@ -14,7 +13,8 @@ import { registerProgressRoutes } from "./progress/routes.js";
 export function buildApp() {
   const app = Fastify({
     logger: true,
-    bodyLimit: 50 * 1024 * 1024
+    bodyLimit: 50 * 1024 * 1024,
+    trustProxy: true
   });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -67,12 +67,9 @@ export function buildApp() {
     decorateReply: false
   });
 
-  // Protect media routes — require valid auth token
-  app.addHook("onRequest", async (request, reply) => {
-    if (!request.url.startsWith("/media/")) return;
-    const auth = await requireAuth(request, reply);
-    if (!auth) return;
-  });
+  // Media files are served without auth — URLs contain random UUIDs making
+  // them unguessable.  Native Video/Image components cannot attach Bearer
+  // headers, so requiring auth here blocks all video playback in the app.
 
   app.get("/health", async () => {
     return {

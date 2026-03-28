@@ -67,6 +67,7 @@ export default function ReelPreviewScreen({
   const insets = useSafeAreaInsets();
   const [showingNow, setShowingNow] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const [showIntention, setShowIntention] = useState(!!goalText);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -98,6 +99,7 @@ export default function ReelPreviewScreen({
     if (visible) {
       setShowingNow(false);
       setVideoReady(false);
+      setVideoError(false);
       setShowIntention(!!goalText);
       setTimelapseIndex(0);
       setTimelapseReady(false);
@@ -169,9 +171,9 @@ export default function ReelPreviewScreen({
     }
   }, [timelapseReady, effectiveMode]);
 
-  // Show content after video loads
+  // Show content after video loads or errors
   useEffect(() => {
-    if (videoReady) {
+    if (videoReady || videoError) {
       Animated.spring(contentAnim, {
         toValue: 1,
         tension: 50,
@@ -179,7 +181,7 @@ export default function ReelPreviewScreen({
         useNativeDriver: true,
       }).start();
     }
-  }, [videoReady, contentAnim]);
+  }, [videoReady, videoError, contentAnim]);
 
   function handlePlaybackStatus(status: AVPlaybackStatus) {
     if (!status.isLoaded) return;
@@ -360,12 +362,18 @@ export default function ReelPreviewScreen({
               isMuted={!purchaseUnlocked}
               shouldPlay={visible}
               onPlaybackStatusUpdate={handlePlaybackStatus}
+              onError={() => setVideoError(true)}
             />
+          ) : null}
+          {(videoError || (!currentUri && effectiveMode === "video")) ? (
+            <View style={styles.videoErrorOverlay}>
+              <Text style={styles.videoErrorText}>unable to load clip</Text>
+            </View>
           ) : null}
         </TactilePressable>
 
         {/* Toggle + info below video */}
-        {videoReady ? (
+        {videoReady || videoError ? (
           <Animated.View
             style={[
               styles.bottomSection,
@@ -647,6 +655,16 @@ const styles = StyleSheet.create({
   saveLinkText: {
     color: "rgba(0,0,0,0.3)",
     fontSize: 13,
+    fontWeight: "600",
+  },
+  videoErrorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoErrorText: {
+    color: "rgba(0,0,0,0.3)",
+    fontSize: 14,
     fontWeight: "600",
   },
   timelapseLabelWrap: {

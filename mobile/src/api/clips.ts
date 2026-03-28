@@ -29,10 +29,15 @@ function preferredApiOrigin() {
   }
 }
 
+function upgradeToHttps(url: string) {
+  if (url.startsWith("http://localhost") || url.startsWith("http://127.0.0.1")) return url;
+  return url.replace(/^http:\/\//, "https://");
+}
+
 function replaceLocalMediaOrigin(url: string, origin: string) {
   try {
     const parsed = new URL(url);
-    if (!isLocalHost(parsed.hostname)) return url;
+    if (!isLocalHost(parsed.hostname)) return upgradeToHttps(url);
     const fallback = new URL(origin);
     parsed.protocol = fallback.protocol;
     parsed.host = fallback.host;
