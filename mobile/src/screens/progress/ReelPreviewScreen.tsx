@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Image,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -300,7 +301,7 @@ export default function ReelPreviewScreen({
   if (!visible) return null;
 
   return (
-    <View style={StyleSheet.absoluteFill}>
+    <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={onClose}>
     <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
       {/* Close button */}
       <Pressable
@@ -509,7 +510,7 @@ export default function ReelPreviewScreen({
         }}
       />
     </Animated.View>
-    </View>
+    </Modal>
   );
 }
 
