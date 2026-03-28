@@ -213,7 +213,53 @@ export default function ChapterRevealScreen({
     }
   }, [phase, contentAnim]);
 
+  // Pre-compose the reel in the background as soon as the screen opens.
+  // By the time the user watches the preview and taps share, it's ready.
+  const [composedUri, setComposedUri] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
+  const composeStarted = useRef(false);
+
+  useEffect(() => {
+    if (!visible || composeStarted.current) return;
+    if (!reelExportInput.token || !reelExportInput.journeyId) return;
+
+    const allClips = reelExportInput.sourceClips ?? [];
+    const trailerClips = (reelExportInput.trailerMoments ?? []).map((m) => m.clip);
+    const fallback = reelExportInput.fallbackClip ? [reelExportInput.fallbackClip] : [];
+    const sourceClips = allClips.length > 0 ? allClips : trailerClips.length > 0 ? trailerClips : fallback;
+    if (!sourceClips.length) return;
+
+    composeStarted.current = true;
+    setComposing(true);
+    if (__DEV__) console.log("[ChapterReveal] Pre-composing reel in background...");
+
+    composeReel({
+      token: reelExportInput.token,
+      journeyId: reelExportInput.journeyId,
+      clips: sourceClips,
+      chapterNumber,
+      milestoneLengthDays: reelExportInput.milestoneLengthDays,
+      progressDays: reelExportInput.progressDays,
+      currentStreak: reelExportInput.currentStreak,
+    }).then((uri) => {
+      if (uri) {
+        setComposedUri(uri);
+        if (__DEV__) console.log("[ChapterReveal] Pre-compose done:", uri.slice(0, 80));
+      }
+    }).catch((error) => {
+      if (__DEV__) console.error("[ChapterReveal] Pre-compose failed:", error);
+    }).finally(() => {
+      setComposing(false);
+    });
+  }, [visible, reelExportInput]);
+
+  // Reset pre-compose state when screen closes
+  useEffect(() => {
+    if (!visible) {
+      composeStarted.current = false;
+      setComposedUri(null);
+    }
+  }, [visible]);
 
   async function handleShare() {
     triggerSelectionHaptic();
@@ -221,22 +267,35 @@ export default function ChapterRevealScreen({
       setPaywallVisible(true);
       return;
     }
-    if (!reelClips.length) return;
 
-    // Get all source clips for server upload
+    // If pre-compose is done, share instantly
+    if (composedUri) {
+      try {
+        await Sharing.shareAsync(composedUri, {
+          mimeType: "video/mp4",
+          dialogTitle: "share your progress",
+        });
+      } catch (error) {
+        if (__DEV__) console.error("[ChapterReveal] Share failed:", error);
+      }
+      return;
+    }
+
+    // Still composing — button already shows "composing..."
+    if (composing) return;
+
+    // Edge case: compose never started or failed — try again
+    if (!reelClips.length) return;
     const allClips = reelExportInput.sourceClips ?? [];
     const trailerClips = (reelExportInput.trailerMoments ?? []).map((m) => m.clip);
     const fallback = reelExportInput.fallbackClip ? [reelExportInput.fallbackClip] : [];
     const sourceClips = allClips.length > 0 ? allClips : trailerClips.length > 0 ? trailerClips : fallback;
 
-    if (!sourceClips.length || !reelExportInput.token || !reelExportInput.journeyId) {
-      if (__DEV__) console.warn("[ChapterReveal] Missing data for composition");
-      return;
-    }
+    if (!sourceClips.length || !reelExportInput.token || !reelExportInput.journeyId) return;
 
     setComposing(true);
     try {
-      const composedUri = await composeReel({
+      const uri = await composeReel({
         token: reelExportInput.token,
         journeyId: reelExportInput.journeyId,
         clips: sourceClips,
@@ -245,14 +304,12 @@ export default function ChapterRevealScreen({
         progressDays: reelExportInput.progressDays,
         currentStreak: reelExportInput.currentStreak,
       });
-
-      if (composedUri) {
-        await Sharing.shareAsync(composedUri, {
+      if (uri) {
+        setComposedUri(uri);
+        await Sharing.shareAsync(uri, {
           mimeType: "video/mp4",
           dialogTitle: "share your progress",
         });
-      } else {
-        if (__DEV__) console.warn("[ChapterReveal] Composition returned null");
       }
     } catch (error) {
       if (__DEV__) console.error("[ChapterReveal] Share failed:", error);
