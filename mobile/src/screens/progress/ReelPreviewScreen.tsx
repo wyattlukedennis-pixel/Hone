@@ -21,6 +21,7 @@ import { TactilePressable } from "../../components/TactilePressable";
 import { triggerSelectionHaptic, triggerMilestoneHaptic, playRevealSound } from "../../utils/feedback";
 import { hasRevealExportPurchase } from "../../utils/purchases";
 import { renderTimelapseVideo } from "../../utils/reelExport";
+import type { Clip } from "../../types/clip";
 
 type ReelPreviewScreenProps = {
   visible: boolean;
@@ -34,6 +35,7 @@ type ReelPreviewScreenProps = {
   // Timelapse props
   mode?: "video" | "timelapse";
   timelapsePhotos?: Array<{ uri: string; label: string }>;
+  timelapseClips?: Clip[];
   // For timelapse export
   token?: string;
   journeyId?: string;
@@ -60,6 +62,7 @@ export default function ReelPreviewScreen({
   onClose,
   mode,
   timelapsePhotos,
+  timelapseClips,
   token,
   journeyId,
 }: ReelPreviewScreenProps) {
@@ -82,6 +85,7 @@ export default function ReelPreviewScreen({
   const effectiveMode = mode ?? "video";
   const [speedPreset, setSpeedPreset] = useState<SpeedPreset>("medium");
   const [timelapseIndex, setTimelapseIndex] = useState(0);
+  const [prevTimelapseIndex, setPrevTimelapseIndex] = useState(0);
   const [timelapseReady, setTimelapseReady] = useState(false);
   const [firstLoopDone, setFirstLoopDone] = useState(false);
 
@@ -148,6 +152,7 @@ export default function ReelPreviewScreen({
     const intervalMs = SPEED_MAP[speedPreset];
     const interval = setInterval(() => {
       setTimelapseIndex((prev) => {
+        setPrevTimelapseIndex(prev);
         const next = (prev + 1) % timelapsePhotos.length;
         if (next === 0 && !firstLoopDone) setFirstLoopDone(true);
         return next;
@@ -222,7 +227,7 @@ export default function ReelPreviewScreen({
     if (!token || !journeyId) return null;
     setExporting(true);
     try {
-      const uri = await renderTimelapseVideo(token, journeyId, SPEED_MAP[speedPreset]);
+      const uri = await renderTimelapseVideo(token, journeyId, SPEED_MAP[speedPreset], timelapseClips);
       return uri;
     } finally {
       setExporting(false);
@@ -358,14 +363,20 @@ export default function ReelPreviewScreen({
         >
           {effectiveMode === "timelapse" && timelapsePhotos?.length ? (
             <>
+              {/* Previous photo behind as fallback to prevent flash */}
               <Image
-                key={timelapseIndex}
+                source={{ uri: timelapsePhotos[prevTimelapseIndex]?.uri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+                fadeDuration={0}
+              />
+              {/* Current photo on top — instant swap, no unmount */}
+              <Image
                 source={{ uri: timelapsePhotos[timelapseIndex]?.uri }}
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
                 fadeDuration={0}
               />
-              {/* Day label removed — shown above the frame instead */}
             </>
           ) : (
             <>

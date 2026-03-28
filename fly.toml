@@ -22,7 +22,7 @@ primary_region = 'sjc'
     soft_limit = 200
 
 [[vm]]
-  memory = '512mb'
+  memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
 

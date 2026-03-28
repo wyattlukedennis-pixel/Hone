@@ -41,23 +41,20 @@ export async function composeReel(params: {
     if (__DEV__) console.log("[reelComposer] Uploading local clips...");
     const localUris = await getAllClipLocalUris();
 
-    for (const clip of clips) {
-      const localUri = localUris[clip.id];
-      if (!localUri) continue; // Already on server or no local file
-
-      try {
-        await uploadLocalClipForRender(token, journeyId, {
+    const uploadPromises = clips
+      .filter((clip) => localUris[clip.id])
+      .map((clip) =>
+        uploadLocalClipForRender(token, journeyId, {
           id: clip.id,
           captureType: clip.captureType,
           durationMs: clip.durationMs,
           recordedAt: clip.recordedAt,
           recordedOn: clip.recordedOn,
-        }, localUri);
-      } catch (error) {
-        if (__DEV__) console.warn(`[reelComposer] Upload failed for clip ${clip.id}:`, error);
-        // Continue — server may already have this clip
-      }
-    }
+        }, localUris[clip.id]!).catch((error) => {
+          if (__DEV__) console.warn(`[reelComposer] Upload failed for clip ${clip.id}:`, error);
+        })
+      );
+    await Promise.all(uploadPromises);
 
     // 2. Request server-side composition
     if (__DEV__) console.log("[reelComposer] Requesting server render...");

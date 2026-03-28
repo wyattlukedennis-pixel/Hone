@@ -17,6 +17,24 @@ import {
 const comparisonTypes = new Set(["day1_vs_latest", "day7_vs_latest", "day30_vs_latest"] as const);
 const milestoneDays = new Set([7, 30, 90, 365]);
 
+// ---------------------------------------------------------------------------
+// Per-user render rate limit: max 3 compositions per day
+// ---------------------------------------------------------------------------
+const RENDER_LIMIT_PER_DAY = 3;
+const renderCounts = new Map<string, { date: string; count: number }>();
+
+function checkRenderRateLimit(userId: string): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  const entry = renderCounts.get(userId);
+  if (!entry || entry.date !== today) {
+    renderCounts.set(userId, { date: today, count: 1 });
+    return true;
+  }
+  if (entry.count >= RENDER_LIMIT_PER_DAY) return false;
+  entry.count++;
+  return true;
+}
+
 type JourneyParams = {
   journeyId: string;
 };
@@ -174,6 +192,10 @@ export function registerProgressRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "NO_CLIPS_AVAILABLE" });
     }
 
+    if (!checkRenderRateLimit(auth.user.id)) {
+      return reply.code(429).send({ error: "RENDER_LIMIT_EXCEEDED", message: "Max 3 compositions per day" });
+    }
+
     try {
       const render = await renderRevealMontage({
         journeyId: journey.id,
@@ -196,6 +218,10 @@ export function registerProgressRoutes(app: FastifyInstance) {
         skippedClipCount: render.skippedClipCount
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message === "RENDER_QUEUE_FULL") {
+        return reply.code(503).send({ error: "RENDER_QUEUE_FULL", message: "Server busy, try again shortly" });
+      }
       request.log.error({ err: error }, "reveal render failed");
       return reply.code(500).send({ error: "REVEAL_RENDER_FAILED" });
     }

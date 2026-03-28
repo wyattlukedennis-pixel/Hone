@@ -13,6 +13,36 @@ const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
 
+// ---------------------------------------------------------------------------
+// Render queue — limits concurrent FFmpeg processes to avoid OOM
+// ---------------------------------------------------------------------------
+const MAX_CONCURRENT_RENDERS = 1;
+const MAX_QUEUED = 10;
+let activeRenders = 0;
+const waitQueue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
+
+async function acquireRenderSlot(): Promise<void> {
+  if (activeRenders < MAX_CONCURRENT_RENDERS) {
+    activeRenders++;
+    return;
+  }
+  if (waitQueue.length >= MAX_QUEUED) {
+    throw new Error("RENDER_QUEUE_FULL");
+  }
+  return new Promise<void>((resolve, reject) => {
+    waitQueue.push({ resolve, reject });
+  });
+}
+
+function releaseRenderSlot(): void {
+  const next = waitQueue.shift();
+  if (next) {
+    next.resolve();
+  } else {
+    activeRenders--;
+  }
+}
+
 type RevealRenderInput = {
   journeyId: string;
   journeyTitle: string;
@@ -153,88 +183,131 @@ async function resolveClipSourcePath(clip: Clip, tempDir: string, index: number)
 }
 
 /**
- * Build a single clip segment: scale/crop to 1080x1920, trim to duration.
- *
- * - Includes original audio from video clips
- * - No text overlays (user adds native TikTok text after export)
- * - Photos get silent audio track for concat compatibility
+ * Single-pass FFmpeg render: all inputs → one filtergraph → one output.
+ * Avoids N+1 process spawns and intermediate file I/O.
  */
-async function buildClipSegment(params: {
-  sourcePath: string;
-  outputPath: string;
-  captureType: "video" | "photo";
-  durationSeconds: number;
-}) {
-  const baseFilter = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1";
+async function renderSinglePass(
+  sources: Array<{ path: string; captureType: "video" | "photo"; durationSeconds: number }>,
+  outputPath: string
+) {
+  const args: string[] = ["-y", "-threads", "2"];
+  const filterParts: string[] = [];
+  const concatInputs: string[] = [];
+  let inputIndex = 0;
 
-  if (params.captureType === "photo") {
-    // Photo → video with silent audio for concat compatibility
-    await runFfmpeg([
-      "-y",
-      "-loop", "1",
-      "-t", params.durationSeconds.toFixed(2),
-      "-i", params.sourcePath,
-      "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-      "-vf", baseFilter,
-      "-r", "30",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-shortest",
-      params.outputPath
-    ]);
-  } else {
-    // Video — keep original audio, trim to duration
-    await runFfmpeg([
-      "-y",
-      "-i", params.sourcePath,
-      "-t", params.durationSeconds.toFixed(2),
-      "-vf", baseFilter,
-      "-r", "30",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-ar", "44100",
-      "-ac", "2",
-      params.outputPath
-    ]);
+  // Add a shared silent audio source for photos
+  const hasPhotos = sources.some((s) => s.captureType === "photo");
+  let silentInputIndex = -1;
+  if (hasPhotos) {
+    args.push("-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo");
+    silentInputIndex = inputIndex++;
+  }
+
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    const idx = inputIndex++;
+
+    if (src.captureType === "photo") {
+      args.push("-loop", "1", "-t", src.durationSeconds.toFixed(2), "-i", src.path);
+      // Scale photo, set duration and frame rate
+      filterParts.push(
+        `[${idx}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,setpts=PTS-STARTPTS[v${i}]`
+      );
+      // Trim silent audio to match photo duration
+      filterParts.push(
+        `[${silentInputIndex}:a]atrim=0:${src.durationSeconds.toFixed(2)},asetpts=PTS-STARTPTS[a${i}]`
+      );
+    } else {
+      args.push("-i", src.path);
+      // Scale and trim video
+      filterParts.push(
+        `[${idx}:v]trim=0:${src.durationSeconds.toFixed(2)},setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v${i}]`
+      );
+      // Trim audio to match, or generate silence if no audio stream
+      filterParts.push(
+        `[${idx}:a]atrim=0:${src.durationSeconds.toFixed(2)},asetpts=PTS-STARTPTS,aresample=44100,aformat=channel_layouts=stereo[a${i}]`
+      );
+    }
+    concatInputs.push(`[v${i}][a${i}]`);
+  }
+
+  // Concat all segments
+  filterParts.push(
+    `${concatInputs.join("")}concat=n=${sources.length}:v=1:a=1[outv][outa]`
+  );
+
+  args.push("-filter_complex", filterParts.join(";\n"));
+  args.push("-map", "[outv]", "-map", "[outa]");
+  args.push(
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
+    outputPath
+  );
+
+  try {
+    await runFfmpeg(args);
+  } catch (error) {
+    // If audio stream missing on a video clip, retry without audio mapping
+    const stderr = error instanceof Error ? error.message : "";
+    if (stderr.includes("does not contain any stream") || stderr.includes("Invalid data")) {
+      await renderSinglePassVideoOnly(sources, outputPath);
+    } else {
+      throw error;
+    }
   }
 }
 
 /**
- * Concatenate segments with hard cuts (no transitions, no flashes).
+ * Fallback: video-only render (no audio) for when source clips lack audio streams.
  */
-async function concatSegments(segmentPaths: string[], outputPath: string, tempDir: string) {
-  const concatListPath = path.join(tempDir, "segments.txt");
-  const concatLines = segmentPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
-  await writeFile(concatListPath, `${concatLines}\n`, "utf8");
+async function renderSinglePassVideoOnly(
+  sources: Array<{ path: string; captureType: "video" | "photo"; durationSeconds: number }>,
+  outputPath: string
+) {
+  const args: string[] = ["-y", "-threads", "2"];
+  const filterParts: string[] = [];
+  const concatInputs: string[] = [];
+  let inputIndex = 0;
 
-  try {
-    // Try stream copy first (fastest)
-    await runFfmpeg(["-y", "-f", "concat", "-safe", "0", "-i", concatListPath, "-c", "copy", outputPath]);
-  } catch {
-    // Fallback: re-encode if stream copy fails due to codec differences
-    await runFfmpeg([
-      "-y",
-      "-f", "concat",
-      "-safe", "0",
-      "-i", concatListPath,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "23",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-r", "30",
-      "-movflags", "+faststart",
-      outputPath
-    ]);
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    const idx = inputIndex++;
+
+    if (src.captureType === "photo") {
+      args.push("-loop", "1", "-t", src.durationSeconds.toFixed(2), "-i", src.path);
+    } else {
+      args.push("-i", src.path);
+    }
+
+    const trim = src.captureType === "photo"
+      ? `[${idx}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,setpts=PTS-STARTPTS[v${i}]`
+      : `[${idx}:v]trim=0:${src.durationSeconds.toFixed(2)},setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30[v${i}]`;
+    filterParts.push(trim);
+    concatInputs.push(`[v${i}]`);
   }
+
+  filterParts.push(
+    `${concatInputs.join("")}concat=n=${sources.length}:v=1:a=0[outv]`
+  );
+
+  args.push("-filter_complex", filterParts.join(";\n"));
+  args.push("-map", "[outv]");
+  args.push(
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-crf", "23",
+    "-pix_fmt", "yuv420p",
+    "-an",
+    "-movflags", "+faststart",
+    outputPath
+  );
+
+  await runFfmpeg(args);
 }
 
 /**
@@ -351,45 +424,42 @@ export async function renderRevealMontage(input: RevealRenderInput): Promise<Rev
     // No cached render yet.
   }
 
+  // Queue for a render slot (limits concurrent FFmpeg to avoid OOM)
+  await acquireRenderSlot();
+
   const tempDir = await mkdtemp(path.join(tmpdir(), "hone-reveal-render-"));
 
   const durations = computeClipDurations(clipCandidates.length, clipCandidates);
 
   try {
-    const clipSegments: string[] = [];
+    // Resolve all source files first
+    const sources: Array<{ path: string; captureType: "video" | "photo"; durationSeconds: number }> = [];
     let skippedClipCount = 0;
     for (let index = 0; index < clipCandidates.length; index += 1) {
       const clip = clipCandidates[index];
       const durationSeconds = durations[index] ?? 1.5;
-
       try {
         const sourcePath = await resolveClipSourcePath(clip, tempDir, index);
-        const segmentPath = path.join(tempDir, `segment-${index + 1}.mp4`);
-        await buildClipSegment({
-          sourcePath,
-          outputPath: segmentPath,
-          captureType: clip.captureType,
-          durationSeconds
-        });
-        clipSegments.push(segmentPath);
+        sources.push({ path: sourcePath, captureType: clip.captureType, durationSeconds });
       } catch {
         skippedClipCount += 1;
       }
     }
 
-    if (!clipSegments.length) {
+    if (!sources.length) {
       throw new Error("RENDER_NO_VALID_CLIPS");
     }
 
-    // Hard cuts — straight concat, no flashes
-    await concatSegments(clipSegments, outputAbsolutePath, tempDir);
+    // Single-pass FFmpeg render — one process, no intermediate files
+    await renderSinglePass(sources, outputAbsolutePath);
     return {
       outputRelativePath,
       cacheHit: false,
-      clipCount: clipSegments.length,
+      clipCount: sources.length,
       skippedClipCount
     };
   } finally {
+    releaseRenderSlot();
     await rm(tempDir, { recursive: true, force: true });
   }
 }
@@ -441,14 +511,21 @@ export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise
     // not cached
   }
 
+  // Queue for a render slot (limits concurrent FFmpeg to avoid OOM)
+  await acquireRenderSlot();
+
   const tempDir = await mkdtemp(path.join(tmpdir(), "hone-timelapse-"));
 
   try {
-    // Download / resolve each photo
+    // Download / resolve each photo (skip missing ones)
     const photoPaths: string[] = [];
     for (let i = 0; i < photoClips.length; i++) {
-      const sourcePath = await resolveClipSourcePath(photoClips[i], tempDir, i);
-      photoPaths.push(sourcePath);
+      try {
+        const sourcePath = await resolveClipSourcePath(photoClips[i], tempDir, i);
+        photoPaths.push(sourcePath);
+      } catch {
+        // Skip missing photos — they may not have been uploaded yet
+      }
     }
 
     if (!photoPaths.length) throw new Error("TIMELAPSE_NO_VALID_PHOTOS");
@@ -468,6 +545,7 @@ export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise
 
     // Render
     await execFileAsync(ffmpegPath, [
+      "-threads", "1",
       "-f", "concat",
       "-safe", "0",
       "-i", concatFile,
@@ -482,6 +560,7 @@ export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise
 
     return { outputRelativePath, cacheHit: false, photoCount: photoPaths.length };
   } finally {
+    releaseRenderSlot();
     await rm(tempDir, { recursive: true, force: true });
   }
 }

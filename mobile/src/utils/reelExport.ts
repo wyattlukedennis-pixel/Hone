@@ -266,7 +266,7 @@ async function resolveRenderedReelAsset(input: ExportReelInput): Promise<Resolve
       cacheHit: response.cacheHit ? exportFile.cacheHit : false
     };
   } catch (error) {
-    if (__DEV__) console.error("[reelExport] resolveRendered FAILED:", error);
+    if (__DEV__) console.warn("[reelExport] resolveRendered FAILED:", error);
     return null;
   }
 }
@@ -557,14 +557,35 @@ export async function resolveReelUri(input: ExportReelInput): Promise<string | n
 
 /**
  * Render a photo timelapse video on the server and download it locally.
+ * Uploads local photo clips first, then requests server render.
  * Returns a local file URI on success, null on failure.
  */
 export async function renderTimelapseVideo(
   token: string,
   journeyId: string,
   holdMs: number,
+  clips?: Clip[],
 ): Promise<string | null> {
   try {
+    // Upload local photo clips so the server can access them
+    if (clips?.length) {
+      const localUris = await getAllClipLocalUris();
+      const uploadPromises = clips
+        .filter((clip) => localUris[clip.id])
+        .map((clip) =>
+          uploadLocalClipForRender(token, journeyId, {
+            id: clip.id,
+            captureType: clip.captureType,
+            durationMs: clip.durationMs,
+            recordedAt: clip.recordedAt,
+            recordedOn: clip.recordedOn,
+          }, localUris[clip.id]!).catch((error) => {
+            if (__DEV__) console.warn(`[reelExport] Upload failed for clip ${clip.id}:`, error);
+          })
+        );
+      await Promise.all(uploadPromises);
+    }
+
     const response = await requestJson<{ url: string; photoCount: number }>(
       `/journeys/${journeyId}/timelapse/render`,
       { method: "POST", token, body: { holdMs } },
