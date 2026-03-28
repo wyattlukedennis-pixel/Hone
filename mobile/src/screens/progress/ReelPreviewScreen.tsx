@@ -295,17 +295,6 @@ export default function ReelPreviewScreen({
         <Text style={styles.closeButtonText}>✕</Text>
       </Pressable>
 
-      {/* DEBUG: show URI state */}
-      <View style={{ position: "absolute", top: insets.top + 44, left: 16, right: 16, zIndex: 99, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 8, padding: 8 }}>
-        <Text style={{ color: "#fff", fontSize: 10, fontFamily: "Courier" }}>
-          firstClip: {firstClipUri ? firstClipUri.slice(0, 60) + "..." : "NULL"}{"\n"}
-          latestClip: {latestClipUri ? latestClipUri.slice(0, 60) + "..." : "NULL"}{"\n"}
-          currentUri: {currentUri ? "truthy" : "NULL/empty"}{"\n"}
-          videoReady: {String(videoReady)} | videoError: {String(videoError)}{"\n"}
-          mode: {effectiveMode}
-        </Text>
-      </View>
-
       {/* Intention overlay */}
       {showIntention && goalText ? (
         <Pressable style={StyleSheet.absoluteFill} onPress={dismissIntention}>
@@ -363,20 +352,35 @@ export default function ReelPreviewScreen({
               />
               {/* Day label removed — shown above the frame instead */}
             </>
-          ) : currentUri ? (
-            <Video
-              key={currentUri}
-              source={{ uri: currentUri }}
-              style={StyleSheet.absoluteFill}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              isMuted={!purchaseUnlocked}
-              shouldPlay={visible}
-              onPlaybackStatusUpdate={handlePlaybackStatus}
-              onError={() => setVideoError(true)}
-            />
-          ) : null}
-          {(videoError || (!currentUri && effectiveMode === "video")) ? (
+          ) : (
+            <>
+              {firstClipUri ? (
+                <Video
+                  source={{ uri: firstClipUri }}
+                  style={[StyleSheet.absoluteFill, { opacity: showingNow ? 0 : 1 }]}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  isMuted={!purchaseUnlocked}
+                  shouldPlay={visible && !showingNow}
+                  onPlaybackStatusUpdate={handlePlaybackStatus}
+                  onError={() => setVideoError(true)}
+                />
+              ) : null}
+              {latestClipUri ? (
+                <Video
+                  source={{ uri: latestClipUri }}
+                  style={[StyleSheet.absoluteFill, { opacity: showingNow ? 1 : 0 }]}
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                  isMuted={!purchaseUnlocked}
+                  shouldPlay={visible && showingNow}
+                  onPlaybackStatusUpdate={handlePlaybackStatus}
+                  onError={() => setVideoError(true)}
+                />
+              ) : null}
+            </>
+          )}
+          {(videoError || (!firstClipUri && !latestClipUri && effectiveMode === "video")) ? (
             <View style={styles.videoErrorOverlay}>
               <Text style={styles.videoErrorText}>unable to load clip</Text>
             </View>
