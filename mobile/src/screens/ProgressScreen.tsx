@@ -1180,6 +1180,7 @@ export function ProgressScreen({
         pairReason={comparisonPlan?.reason ?? null}
         pairConsistencyScore={comparisonPlan?.consistencyScore ?? null}
         trailerMoments={comparisonPlan?.trailerMoments ?? null}
+        allChapterClips={revealTrackClips}
         storylineHeadline={liveRevealStoryline?.headline ?? null}
         storylineCaption={liveRevealStoryline?.caption ?? null}
         storylineReflection={liveRevealStoryline?.reflection ?? null}

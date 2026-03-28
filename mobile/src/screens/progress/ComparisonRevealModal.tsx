@@ -7,6 +7,7 @@ import LottieView from "lottie-react-native";
 import { trackEvent } from "../../analytics/events";
 import { LogoMorphLoader } from "../../components/LogoMorphLoader";
 import { LoopingVideoPlayer } from "../../components/LoopingVideoPlayer";
+import { SequentialReelPlayer } from "../../components/SequentialReelPlayer";
 import { PaywallModal } from "../../components/PaywallModal";
 import { ProofReceiptModal } from "../../components/ProofReceiptModal";
 import { TactilePressable } from "../../components/TactilePressable";
@@ -53,6 +54,7 @@ type ComparisonRevealModalProps = {
   pairReason?: string | null;
   pairConsistencyScore?: number | null;
   trailerMoments?: ChapterTrailerMoment[] | null;
+  allChapterClips?: Clip[] | null;
   storylineHeadline?: string | null;
   storylineCaption?: string | null;
   storylineReflection?: string | null;
@@ -172,6 +174,7 @@ export function ComparisonRevealModal({
   pairReason: _pairReason = null,
   pairConsistencyScore: _pairConsistencyScore = null,
   trailerMoments = null,
+  allChapterClips = null,
   storylineHeadline = null,
   storylineCaption = null,
   storylineReflection = null,
@@ -283,6 +286,23 @@ export function ComparisonRevealModal({
     }
     return cards;
   }, [trailerMoments, cards]);
+  const sequentialReelClips = useMemo(() => {
+    if (allChapterClips && allChapterClips.length >= 2) {
+      const sorted = [...allChapterClips].sort(
+        (a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime()
+      );
+      return sorted.map((clip, index) => ({
+        uri: clip.videoUrl,
+        label: `day ${index + 1}`,
+        holdMs: index === 0 ? 3000 : index === sorted.length - 1 ? 3000 : 800,
+      }));
+    }
+    return reelCards.map((entry, index) => ({
+      uri: entry.clip.videoUrl,
+      label: entry.title.toLowerCase(),
+      holdMs: index === 0 ? 3000 : index === reelCards.length - 1 ? 3000 : 800,
+    }));
+  }, [allChapterClips, reelCards]);
   const reelMomentsLabel = `${reelCards.length} ${reelCards.length === 1 ? "moment" : "moments"}`;
   const chapterProgressLabel = `${Math.min(progressDays, milestoneLengthDays)} / ${milestoneLengthDays} days`;
   const reelStatsLabel =
@@ -1368,17 +1388,12 @@ export function ComparisonRevealModal({
             {stage === "reel" && reelCards.length ? (
               <View style={styles.reelStage}>
                 <View style={styles.reelVideoWrap}>
-                  <LoopingVideoPlayer
-                    uri={reelCards[reelIndex]?.clip.videoUrl ?? reelCards[0].clip.videoUrl}
-                    mediaType={reelCards[reelIndex]?.clip.captureType ?? reelCards[0].clip.captureType}
-                    posterUri={reelCards[reelIndex]?.clip.thumbnailUrl ?? reelCards[0].clip.thumbnailUrl}
+                  <SequentialReelPlayer
+                    clips={sequentialReelClips}
                     style={[styles.reelVideo, { height: reelVideoHeight }]}
-                    resizeMode={ResizeMode.COVER}
-                    showControls
+                    loop
                     muted={false}
                     autoPlay={reelPlaying}
-                    active
-                    loop
                   />
                 </View>
 
