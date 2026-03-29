@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import * as MediaLibrary from "expo-media-library";
 import { LogoMorphLoader } from "../../components/LogoMorphLoader";
 import { PaywallModal } from "../../components/PaywallModal";
 import { TactilePressable } from "../../components/TactilePressable";
@@ -100,7 +99,6 @@ export default function ReelPreviewScreen({
   const [phase, setPhase] = useState<Phase>("loading");
   const [showingNow, setShowingNow] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [exporting, setExporting] = useState(false);
   const [purchaseBump, setPurchaseBump] = useState(0);
   const purchaseUnlocked = hasRevealExportPurchase() || purchaseBump > 0;
@@ -166,7 +164,6 @@ export default function ReelPreviewScreen({
     setTimelapseIndex(0);
     setTimelapseReady(false);
     setSpeedPreset("medium");
-    setSaveState("idle");
     setExporting(false);
     revealSoundPlayed.current = false;
     firstVideoLoaded.current = false;
@@ -483,38 +480,6 @@ export default function ReelPreviewScreen({
     } catch { /* user cancelled */ }
   }
 
-  async function handleSave() {
-    if (!purchaseUnlocked) { setPaywallVisible(true); return; }
-    if (saveState !== "idle") return;
-    triggerSelectionHaptic();
-    const { status } = await MediaLibrary.requestPermissionsAsync(true);
-    if (status !== "granted") return;
-    setSaveState("saving");
-    try {
-      let localUri: string | null = null;
-
-      if (effectiveMode === "timelapse") {
-        localUri = await renderTimelapse();
-      } else if (currentUri) {
-        localUri = currentUri;
-        if (currentUri.startsWith("http")) {
-          const dest = `${FileSystem.cacheDirectory}hone-save-${Date.now()}.mp4`;
-          const { uri: downloaded } = await FileSystem.downloadAsync(currentUri, dest);
-          localUri = downloaded;
-        }
-      }
-
-      if (localUri) {
-        await MediaLibrary.saveToLibraryAsync(localUri);
-        setSaveState("saved");
-        triggerMilestoneHaptic();
-      } else {
-        setSaveState("idle");
-      }
-    } catch {
-      setSaveState("idle");
-    }
-  }
 
   const contentTranslateY = contentAnim.interpolate({
     inputRange: [0, 1],
@@ -738,16 +703,6 @@ export default function ReelPreviewScreen({
                   onPress={() => { void handleShare(); }}
                 >
                   <Text style={styles.shareButtonText}>{exporting ? "rendering..." : "share"}</Text>
-                </TactilePressable>
-                <TactilePressable
-                  style={styles.saveLink}
-                  pressScale={0.97}
-                  onPress={() => { void handleSave(); }}
-                  disabled={saveState === "saving"}
-                >
-                  <Text style={[styles.saveLinkText, { color: textMuted }]}>
-                    {saveState === "idle" ? "save to camera roll" : saveState === "saving" ? "saving..." : "saved"}
-                  </Text>
                 </TactilePressable>
               </View>
             ) : (
@@ -981,13 +936,5 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "800",
-  },
-  saveLink: {
-    alignSelf: "center",
-    paddingVertical: 8,
-  },
-  saveLinkText: {
-    fontSize: 13,
-    fontWeight: "600",
   },
 });

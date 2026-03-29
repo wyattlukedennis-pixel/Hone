@@ -796,7 +796,7 @@ const styles = StyleSheet.create({
   },
   cellDoneHeroPhoto: {
     borderColor: "rgba(232,69,10,0.3)",
-    backgroundColor: "rgba(41,41,41,0.84)",
+    backgroundColor: "rgba(255,90,31,0.88)",
     shadowColor: "#000000",
     shadowOpacity: 0.16,
     shadowRadius: 8,
@@ -805,12 +805,12 @@ const styles = StyleSheet.create({
   },
   cellDoneHeroPhotoScene: {
     borderColor: "rgba(232,69,10,0.3)",
-    backgroundColor: "rgba(41,41,41,0.88)"
+    backgroundColor: "rgba(255,90,31,0.9)"
   },
   cellDoneHeroDual: {
     borderColor: "rgba(232,69,10,0.3)",
     borderWidth: 1,
-    backgroundColor: "#131313",
+    backgroundColor: "rgba(255,90,31,0.88)",
     shadowColor: "#000000",
     shadowOpacity: 0.16,
     shadowRadius: 8,
@@ -1032,15 +1032,15 @@ const styles = StyleSheet.create({
   },
   cellDone: {
     borderColor: "rgba(232,69,10,0.3)",
-    backgroundColor: "rgba(255,90,31,0.32)"
+    backgroundColor: "rgba(255,90,31,0.75)"
   },
   cellDonePhoto: {
     borderColor: "rgba(232,69,10,0.3)",
-    backgroundColor: "rgba(41,41,41,0.3)"
+    backgroundColor: "rgba(255,90,31,0.75)"
   },
   cellDoneDual: {
     borderColor: "rgba(232,69,10,0.3)",
-    backgroundColor: "#161616"
+    backgroundColor: "rgba(255,90,31,0.75)"
   },
   cellPartial: {
     borderColor: "rgba(0,0,0,0.06)",

@@ -167,9 +167,9 @@ export function ManageScreen({
           const modeEmoji = journey.captureMode === "photo" ? "\uD83D\uDCF7" : "\uD83C\uDFA5";
 
           return (
-            <View key={journey.id} style={[styles.card, darkMode ? { borderColor: theme.darkColors.cardBorder } : null]}>
+            <View key={journey.id} style={[styles.card, isActive && styles.cardActive, darkMode ? { borderColor: isActive ? "rgba(255,90,31,0.25)" : theme.darkColors.cardBorder } : null]}>
               <LinearGradient
-                colors={darkMode ? theme.gradients.intelCardDark : isActive ? ["rgba(255,90,31,0.08)", "rgba(255,90,31,0.03)"] : theme.gradients.heroSurface}
+                colors={darkMode ? (isActive ? theme.gradients.intelCardDark : theme.gradients.intelCardDark) : isActive ? theme.gradients.heroSurface : ["rgba(246,240,232,0.5)", "rgba(246,240,232,0.35)"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
@@ -182,7 +182,7 @@ export function ManageScreen({
                   {isActive ? (
                     <Text style={styles.cardKicker}>active journey</Text>
                   ) : null}
-                  <Text style={[styles.cardTitle, darkMode ? { color: theme.darkColors.textPrimary } : null]} numberOfLines={2}>{journey.title.toLowerCase()}</Text>
+                  <Text style={[isActive ? styles.cardTitleActive : styles.cardTitle, darkMode ? { color: theme.darkColors.textPrimary } : null]} numberOfLines={2}>{journey.title.toLowerCase()}</Text>
                 </View>
                 <Text style={styles.modeEmoji}>{modeEmoji}</Text>
               </View>
@@ -190,20 +190,20 @@ export function ManageScreen({
               {/* Stats row */}
               <View style={[styles.statsRow, darkMode && { backgroundColor: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.06)" }]}>
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, darkMode && { color: theme.darkColors.textPrimary }]}>{Math.max(dayCount, 1)}</Text>
-                  <Text style={[styles.statLabel, darkMode && { color: theme.darkColors.textSecondary }]}>day</Text>
+                  <Text style={[styles.statValue, isActive && styles.statValueActive, darkMode && { color: theme.darkColors.textPrimary }]}>{Math.max(dayCount, 1)}</Text>
+                  <Text style={[styles.statLabel, isActive && styles.statLabelActive, darkMode && { color: theme.darkColors.textSecondary }]}>day</Text>
                 </View>
                 <View style={[styles.statDivider, darkMode && { backgroundColor: "rgba(255,255,255,0.1)" }]} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, streak >= 7 ? styles.statValueHot : undefined, darkMode && streak < 7 && { color: theme.darkColors.textPrimary }]}>
+                  <Text style={[styles.statValue, isActive && styles.statValueActive, streak >= 7 ? styles.statValueHot : undefined, darkMode && streak < 7 && { color: theme.darkColors.textPrimary }]}>
                     {streak}
                   </Text>
-                  <Text style={[styles.statLabel, darkMode && { color: theme.darkColors.textSecondary }]}>streak</Text>
+                  <Text style={[styles.statLabel, isActive && styles.statLabelActive, darkMode && { color: theme.darkColors.textSecondary }]}>streak</Text>
                 </View>
                 <View style={[styles.statDivider, darkMode && { backgroundColor: "rgba(255,255,255,0.1)" }]} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, darkMode && { color: theme.darkColors.textPrimary }]}>{journey.milestoneLengthDays}d</Text>
-                  <Text style={[styles.statLabel, darkMode && { color: theme.darkColors.textSecondary }]}>chapter</Text>
+                  <Text style={[styles.statValue, isActive && styles.statValueActive, darkMode && { color: theme.darkColors.textPrimary }]}>{journey.milestoneLengthDays}d</Text>
+                  <Text style={[styles.statLabel, isActive && styles.statLabelActive, darkMode && { color: theme.darkColors.textSecondary }]}>chapter</Text>
                 </View>
               </View>
 
@@ -595,8 +595,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.06)",
     overflow: "hidden",
-    padding: 18,
-    gap: 14,
+    padding: 16,
+    gap: 12,
+  },
+  cardActive: {
+    borderColor: "rgba(255,90,31,0.2)",
+    borderWidth: 1.5,
+    padding: 20,
+    gap: 16,
   },
   activeIndicator: {
     position: "absolute",
@@ -624,11 +630,18 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   cardTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: "800",
     color: theme.colors.textPrimary,
     fontFamily: theme.typography.display,
-    lineHeight: 28,
+    lineHeight: 24,
+  },
+  cardTitleActive: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: theme.colors.textPrimary,
+    fontFamily: theme.typography.display,
+    lineHeight: 32,
   },
   modeEmoji: {
     fontSize: 20,
@@ -651,21 +664,27 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   statValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "800",
     color: theme.colors.textPrimary,
     fontFamily: theme.typography.heading,
+  },
+  statValueActive: {
+    fontSize: 22,
   },
   statValueHot: {
     color: theme.colors.accent,
   },
   statLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     color: theme.colors.textSecondary,
     fontFamily: theme.typography.label,
     letterSpacing: 0.2,
     opacity: 0.6,
+  },
+  statLabelActive: {
+    fontSize: 12,
   },
   statDivider: {
     width: 1,
