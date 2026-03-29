@@ -92,24 +92,24 @@ export default function App() {
   const tabOrder: TabKey[] = useMemo(() => ["journeys", "progress", "settings"], []);
   const tabScrollRef = useRef<ScrollView>(null);
   const tabScrollX = useRef(new Animated.Value(0)).current;
-  const tabSetBySwipeRef = useRef(false);
+  const programmaticScrollRef = useRef(false);
 
   // Scroll to tab position when tab changes via TabBar tap
   useEffect(() => {
-    if (tabSetBySwipeRef.current) {
-      tabSetBySwipeRef.current = false;
-      return;
-    }
     const idx = tabOrder.indexOf(tab);
+    programmaticScrollRef.current = true;
     tabScrollRef.current?.scrollTo({ x: idx * screenWidth, animated: true });
   }, [tab, screenWidth, tabOrder]);
 
   const handleTabScrollEnd = useMemo(() => {
     return (e: { nativeEvent: { contentOffset: { x: number } } }) => {
+      if (programmaticScrollRef.current) {
+        programmaticScrollRef.current = false;
+        return;
+      }
       const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
       const newTab = tabOrder[idx];
       if (newTab) {
-        tabSetBySwipeRef.current = true;
         setTab(newTab);
       }
     };
@@ -764,6 +764,7 @@ export default function App() {
                     [{ nativeEvent: { contentOffset: { x: tabScrollX } } }],
                     { useNativeDriver: true }
                   )}
+                  onScrollBeginDrag={() => { programmaticScrollRef.current = false; }}
                   onMomentumScrollEnd={handleTabScrollEnd}
                   style={styles.tabSwipeContainer}
                   contentContainerStyle={styles.tabStrip}
