@@ -11,6 +11,7 @@ import { archiveJourney, createJourney, listJourneys, updateJourney } from "./ap
 import { GlassSurface } from "./components/GlassSurface";
 import { TabBar } from "./components/TabBar";
 import { env } from "./env";
+import { showDevTools } from "./utils/environment";
 import { identifyUser, initPurchases } from "./utils/purchases";
 import {
   addDailyMomentNotificationResponseListener,
@@ -148,7 +149,7 @@ export default function App() {
         const [token, storedJourneyId, storedDevDateShift, storedDailyMoment, storedHapticsMode, , storedOnboardingDone, storedDarkMode] = await Promise.all([
           readAuthToken(),
           readActiveJourneyId(),
-          __DEV__ ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings),
+          showDevTools() ? readDevDateShiftSettings() : Promise.resolve(defaultDevDateShiftSettings),
           readDailyMomentSettings(),
           readHapticsMode(),
           initPurchases(),
@@ -156,7 +157,7 @@ export default function App() {
           readDarkMode()
         ]);
         if (storedJourneyId) setActiveJourneyId(storedJourneyId);
-        if (__DEV__) setDevDateShiftSettings(storedDevDateShift);
+        if (showDevTools()) setDevDateShiftSettings(storedDevDateShift);
         setDailyMomentSettings(storedDailyMoment);
         setHapticsMode(storedHapticsMode);
         applyHapticsMode(storedHapticsMode);
@@ -676,7 +677,7 @@ export default function App() {
         user={session.user}
         onLogout={handleLogout}
         loggingOut={logoutLoading}
-        devDateShiftSettings={__DEV__ ? devDateShiftSettings : null}
+        devDateShiftSettings={showDevTools() ? devDateShiftSettings : null}
         onDevDateShiftSettingsChange={(next) => {
           void handleDevDateShiftSettingsChange(next);
         }}
@@ -729,7 +730,7 @@ export default function App() {
           <SafeAreaView style={styles.safeArea}>
             <View style={styles.topBar}>
               <View style={styles.topBarRow}>
-                {__DEV__ ? (
+                {showDevTools() ? (
                   <GlassSurface style={styles.devBadge} intensity={10}>
                     <LinearGradient
                       pointerEvents="none"
