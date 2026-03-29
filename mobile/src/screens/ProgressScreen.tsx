@@ -1384,7 +1384,9 @@ export function ProgressScreen({
         firstClipUri={comparison?.thenClip.videoUrl ?? null}
         latestClipUri={comparison?.nowClip.videoUrl ?? null}
         daySpan={reelMode === "timelapse" ? composedDaySpan : chapterProgressDays}
+        chapterNumber={chapterNumber}
         goalText={selectedJourney?.goalText ?? null}
+        darkMode={darkMode}
         onClose={() => setReelPreviewVisible(false)}
         mode={reelMode}
         timelapsePhotos={reelMode === "timelapse" ? timelapsePhotos : undefined}

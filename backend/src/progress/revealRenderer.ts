@@ -452,6 +452,16 @@ export async function renderRevealMontage(input: RevealRenderInput): Promise<Rev
 
     // Single-pass FFmpeg render — one process, no intermediate files
     await renderSinglePass(sources, outputAbsolutePath);
+
+    // Clean up uploaded source clips — they're temporary copies for FFmpeg.
+    // Only delete files under the uploads dir (not temp dir or renders).
+    const rendersDir = path.join(config.uploads.dir, "renders");
+    for (const source of sources) {
+      if (source.path.startsWith(config.uploads.dir) && !source.path.startsWith(rendersDir) && !source.path.startsWith(tempDir)) {
+        rm(source.path, { force: true }).catch(() => {});
+      }
+    }
+
     return {
       outputRelativePath,
       cacheHit: false,
@@ -557,6 +567,14 @@ export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise
       "-an",
       "-y", outputAbsolutePath,
     ], { maxBuffer: 50 * 1024 * 1024 });
+
+    // Clean up uploaded source photos after render
+    const rendersDir = path.join(config.uploads.dir, "renders");
+    for (const p of photoPaths) {
+      if (p.startsWith(config.uploads.dir) && !p.startsWith(rendersDir) && !p.startsWith(tempDir)) {
+        rm(p, { force: true }).catch(() => {});
+      }
+    }
 
     return { outputRelativePath, cacheHit: false, photoCount: photoPaths.length };
   } finally {

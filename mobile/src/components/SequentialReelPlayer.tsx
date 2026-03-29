@@ -38,6 +38,7 @@ export function SequentialReelPlayer({
   const [ready, setReady] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clipTimerStarted = useRef(false);
+  const videoRefs = useRef<Map<number, Video>>(new Map());
 
   const clip = clips[currentIndex];
 
@@ -68,12 +69,18 @@ export function SequentialReelPlayer({
     };
   }, []);
 
-  // Reset hold timer when index changes
+  // When current index changes: reset timer and seek the new clip to 0
   useEffect(() => {
     clipTimerStarted.current = false;
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
+    }
+
+    // Seek current video back to start so it replays from the beginning
+    const videoRef = videoRefs.current.get(currentIndex);
+    if (videoRef) {
+      videoRef.setPositionAsync(0).catch(() => {});
     }
   }, [currentIndex]);
 
@@ -99,6 +106,13 @@ export function SequentialReelPlayer({
               />
             ) : (
               <Video
+                ref={(ref) => {
+                  if (ref) {
+                    videoRefs.current.set(index, ref);
+                  } else {
+                    videoRefs.current.delete(index);
+                  }
+                }}
                 source={{ uri: entry.uri }}
                 style={StyleSheet.absoluteFill}
                 resizeMode={ResizeMode.COVER}
@@ -108,15 +122,13 @@ export function SequentialReelPlayer({
                 onPlaybackStatusUpdate={isCurrent ? (status: AVPlaybackStatus) => {
                   if (!status.isLoaded) {
                     if ("error" in status && status.error) {
-                      if (__DEV__) console.error("[SequentialReelPlayer] load error:", status.error);
                       onClipReady();
                     }
                     return;
                   }
                   onClipReady();
                 } : undefined}
-                onError={isCurrent ? (error: string) => {
-                  if (__DEV__) console.error("[SequentialReelPlayer] onError:", error);
+                onError={isCurrent ? () => {
                   onClipReady();
                 } : undefined}
               />

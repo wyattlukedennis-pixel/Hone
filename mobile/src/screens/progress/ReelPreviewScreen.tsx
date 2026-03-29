@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Easing,
   Image,
   Modal,
   Platform,
@@ -16,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as MediaLibrary from "expo-media-library";
+import { LogoMorphLoader } from "../../components/LogoMorphLoader";
 import { PaywallModal } from "../../components/PaywallModal";
 import { TactilePressable } from "../../components/TactilePressable";
 import { triggerSelectionHaptic, triggerMilestoneHaptic, playRevealSound } from "../../utils/feedback";
@@ -30,7 +32,9 @@ type ReelPreviewScreenProps = {
   /** URI for the latest clip */
   latestClipUri: string | null;
   daySpan: number;
+  chapterNumber?: number;
   goalText?: string | null;
+  darkMode?: boolean;
   onClose: () => void;
   // Timelapse props
   mode?: "video" | "timelapse";
@@ -41,8 +45,29 @@ type ReelPreviewScreenProps = {
   journeyId?: string;
 };
 
-const ACCENT_ORANGE = "#E8450A";
-const VIDEO_BORDER_RADIUS = 20;
+const ACCENT = "#E8450A";
+const VIDEO_RADIUS = 20;
+const LOADING_MS = 3200;
+
+// Light mode palette
+const LIGHT_BG = "#f4efe6";
+const LIGHT_TEXT_PRIMARY = "#101010";
+const LIGHT_TEXT_SECONDARY = "rgba(0,0,0,0.35)";
+const LIGHT_TEXT_MUTED = "rgba(0,0,0,0.3)";
+const LIGHT_CLOSE_BG = "rgba(0,0,0,0.06)";
+const LIGHT_VIDEO_BG = "#e8e2d8";
+const LIGHT_PILL_BG = "rgba(0,0,0,0.04)";
+const LIGHT_PILL_TEXT = "rgba(0,0,0,0.3)";
+
+// Dark mode palette
+const DARK_BG = "#0a0a0a";
+const DARK_TEXT_PRIMARY = "#f6f1e8";
+const DARK_TEXT_SECONDARY = "rgba(255,255,255,0.35)";
+const DARK_TEXT_MUTED = "rgba(255,255,255,0.3)";
+const DARK_CLOSE_BG = "rgba(255,255,255,0.1)";
+const DARK_VIDEO_BG = "#1a1816";
+const DARK_PILL_BG = "rgba(255,255,255,0.08)";
+const DARK_PILL_TEXT = "rgba(255,255,255,0.3)";
 
 type SpeedPreset = "slow" | "medium" | "fast" | "rapid";
 const SPEED_MAP: Record<SpeedPreset, number> = {
@@ -53,12 +78,16 @@ const SPEED_MAP: Record<SpeedPreset, number> = {
 };
 const SPEED_PRESETS: SpeedPreset[] = ["slow", "medium", "fast", "rapid"];
 
+type Phase = "loading" | "intention" | "playing" | "error";
+
 export default function ReelPreviewScreen({
   visible,
   firstClipUri,
   latestClipUri,
   daySpan,
+  chapterNumber,
   goalText,
+  darkMode = false,
   onClose,
   mode,
   timelapsePhotos,
@@ -68,112 +97,301 @@ export default function ReelPreviewScreen({
 }: ReelPreviewScreenProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const [phase, setPhase] = useState<Phase>("loading");
   const [showingNow, setShowingNow] = useState(false);
-  const [videoReady, setVideoReady] = useState(false);
-  const [videoError, setVideoError] = useState(false);
-  const [showIntention, setShowIntention] = useState(!!goalText);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [exporting, setExporting] = useState(false);
   const [purchaseBump, setPurchaseBump] = useState(0);
   const purchaseUnlocked = hasRevealExportPurchase() || purchaseBump > 0;
+
+  // Theme colors
+  const bg = darkMode ? DARK_BG : LIGHT_BG;
+  const textPrimary = darkMode ? DARK_TEXT_PRIMARY : LIGHT_TEXT_PRIMARY;
+  const textSecondary = darkMode ? DARK_TEXT_SECONDARY : LIGHT_TEXT_SECONDARY;
+  const textMuted = darkMode ? DARK_TEXT_MUTED : LIGHT_TEXT_MUTED;
+  const closeBg = darkMode ? DARK_CLOSE_BG : LIGHT_CLOSE_BG;
+  const videoBg = darkMode ? DARK_VIDEO_BG : LIGHT_VIDEO_BG;
+  const pillBg = darkMode ? DARK_PILL_BG : LIGHT_PILL_BG;
+  const pillText = darkMode ? DARK_PILL_TEXT : LIGHT_PILL_TEXT;
+
+  // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const contentAnim = useRef(new Animated.Value(0)).current;
   const intentionAnim = useRef(new Animated.Value(1)).current;
-  const switchAnim = useRef(new Animated.Value(0)).current; // 0 = day 1, 1 = now
+  const switchAnim = useRef(new Animated.Value(0)).current;
+  const revealSoundPlayed = useRef(false);
+
+  // Loading phase animations
+  const logoScale = useRef(new Animated.Value(0.6)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
+  const glowScale = useRef(new Animated.Value(0.8)).current;
+  const loadingTextOpacity = useRef(new Animated.Value(0)).current;
+  const chapterTextOpacity = useRef(new Animated.Value(0)).current;
+  const chapterTextScale = useRef(new Animated.Value(0.9)).current;
+
+  // Transition animations
+  const flashOpacity = useRef(new Animated.Value(0)).current;
+  const loadingExitScale = useRef(new Animated.Value(1)).current;
+  const loadingExitOpacity = useRef(new Animated.Value(1)).current;
+  const videoEntryScale = useRef(new Animated.Value(0.85)).current;
+  const videoEntryOpacity = useRef(new Animated.Value(0)).current;
+
+  // Breathing pulse for glow
+  const breatheAnim = useRef(new Animated.Value(0)).current;
 
   const effectiveMode = mode ?? "video";
   const [speedPreset, setSpeedPreset] = useState<SpeedPreset>("medium");
   const [timelapseIndex, setTimelapseIndex] = useState(0);
   const [prevTimelapseIndex, setPrevTimelapseIndex] = useState(0);
   const [timelapseReady, setTimelapseReady] = useState(false);
-  const [firstLoopDone, setFirstLoopDone] = useState(false);
 
   // Video frame sizing
-  const videoPadding = 20;
-  const frameWidth = width - videoPadding * 2;
-  const frameHeight = (frameWidth * 16) / 9;
+  const framePadding = 20;
   const maxFrameHeight = height - insets.top - insets.bottom - 240;
-  const finalFrameHeight = Math.min(frameHeight, maxFrameHeight);
-  const finalFrameWidth = (finalFrameHeight * 9) / 16;
+  const idealFrameHeight = ((width - framePadding * 2) * 16) / 9;
+  const frameHeight = Math.min(idealFrameHeight, maxFrameHeight);
+  const frameWidth = (frameHeight * 9) / 16;
 
   const currentUri = showingNow ? latestClipUri : firstClipUri;
 
+  // Orchestrate loading animation sequence
   useEffect(() => {
-    if (visible) {
-      setShowingNow(false);
-      setVideoReady(false);
-      setVideoError(false);
-      setShowIntention(!!goalText);
-      setTimelapseIndex(0);
-      setTimelapseReady(false);
-      setSpeedPreset("medium");
-      setFirstLoopDone(false);
-      setSaveState("idle");
-      setExporting(false);
-      fadeAnim.setValue(1);
-      contentAnim.setValue(0);
-      intentionAnim.setValue(1);
-      switchAnim.setValue(0);
-    }
-  }, [visible, fadeAnim, contentAnim, goalText, intentionAnim, switchAnim]);
+    if (!visible) return;
 
-  // Auto-dismiss intention after 3s
-  useEffect(() => {
-    if (!visible || !showIntention || !goalText) return;
-    const timer = setTimeout(dismissIntention, 3000);
-    return () => clearTimeout(timer);
-  }, [visible, showIntention, goalText]);
+    // Reset all state
+    setPhase(goalText ? "intention" : "loading");
+    setShowingNow(false);
+    setTimelapseIndex(0);
+    setTimelapseReady(false);
+    setSpeedPreset("medium");
+    setSaveState("idle");
+    setExporting(false);
+    revealSoundPlayed.current = false;
+    firstVideoLoaded.current = false;
+    latestVideoLoaded.current = false;
 
-  function dismissIntention() {
-    Animated.timing(intentionAnim, {
-      toValue: 0,
-      duration: 500,
+    // Reset all animation values
+    fadeAnim.setValue(0);
+    contentAnim.setValue(0);
+    intentionAnim.setValue(1);
+    switchAnim.setValue(0);
+    logoScale.setValue(0.6);
+    logoOpacity.setValue(0);
+    glowOpacity.setValue(0);
+    glowScale.setValue(0.8);
+    loadingTextOpacity.setValue(0);
+    chapterTextOpacity.setValue(0);
+    chapterTextScale.setValue(0.9);
+    flashOpacity.setValue(0);
+    loadingExitScale.setValue(1);
+    loadingExitOpacity.setValue(1);
+    videoEntryScale.setValue(0.85);
+    videoEntryOpacity.setValue(0);
+
+    // Fade in the screen
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
       useNativeDriver: true,
-    }).start(() => setShowIntention(false));
-  }
+    }).start();
 
-  // Prefetch timelapse images
+    // Start breathing pulse loop
+    const breatheLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breatheAnim, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breatheAnim, {
+          toValue: 0,
+          duration: 1400,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    breatheLoop.start();
+
+    const baseDelay = goalText ? 3000 : 0;
+
+    // Show intention first if goalText exists
+    if (goalText) {
+      const intentionTimer = setTimeout(() => {
+        Animated.timing(intentionAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }).start(() => setPhase("loading"));
+      }, 3000);
+
+      const loadingSequenceTimer = setTimeout(() => {
+        runLoadingSequence();
+      }, 3500);
+
+      return () => {
+        clearTimeout(intentionTimer);
+        clearTimeout(loadingSequenceTimer);
+        breatheLoop.stop();
+      };
+    }
+
+    // No intention — start loading sequence immediately
+    runLoadingSequence();
+
+    return () => {
+      breatheLoop.stop();
+    };
+
+    function runLoadingSequence() {
+      // 1. Chapter text fades in first (0ms)
+      Animated.parallel([
+        Animated.timing(chapterTextOpacity, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.spring(chapterTextScale, {
+          toValue: 1,
+          tension: 60,
+          friction: 10,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      // 2. Logo enters with spring (300ms)
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.spring(logoScale, {
+            toValue: 1,
+            tension: 40,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.timing(logoOpacity, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }, 300);
+
+      // 3. Glow ring appears (600ms)
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.spring(glowScale, {
+            toValue: 1,
+            tension: 50,
+            friction: 9,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }, 600);
+
+      // 4. "building your reveal..." text fades in (1000ms)
+      setTimeout(() => {
+        Animated.timing(loadingTextOpacity, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }).start();
+      }, 1000);
+    }
+  }, [visible]);
+
+  // Prefetch timelapse images during loading phase
   useEffect(() => {
     if (!visible || effectiveMode !== "timelapse" || !timelapsePhotos?.length) return;
 
     Promise.all(timelapsePhotos.map((p) => Image.prefetch(p.uri)))
       .then(() => setTimelapseReady(true))
-      .catch(() => setTimelapseReady(true)); // proceed even if some fail
+      .catch(() => setTimelapseReady(true));
 
     return () => setTimelapseReady(false);
   }, [visible, effectiveMode, timelapsePhotos]);
 
-  // Cycle through timelapse photos
+  // Trigger transition when content is ready
+  const transitionTriggered = useRef(false);
   useEffect(() => {
-    if (!visible || effectiveMode !== "timelapse" || !timelapseReady || !timelapsePhotos?.length)
+    if (!visible) {
+      transitionTriggered.current = false;
       return;
-
-    const intervalMs = SPEED_MAP[speedPreset];
-    const interval = setInterval(() => {
-      setTimelapseIndex((prev) => {
-        setPrevTimelapseIndex(prev);
-        const next = (prev + 1) % timelapsePhotos.length;
-        if (next === 0 && !firstLoopDone) setFirstLoopDone(true);
-        return next;
-      });
-    }, intervalMs);
-
-    return () => clearInterval(interval);
-  }, [visible, effectiveMode, timelapseReady, speedPreset, timelapsePhotos, firstLoopDone]);
-
-  // Kick off reveal when timelapse is ready
-  useEffect(() => {
-    if (timelapseReady && effectiveMode === "timelapse") {
-      setVideoReady(true);
-      playRevealSound();
-      setTimeout(() => setFirstLoopDone(true), 800);
     }
-  }, [timelapseReady, effectiveMode]);
+    if (transitionTriggered.current) return;
+    if (phase !== "loading") return;
 
-  // Show content after video loads or errors
+    const isReady = effectiveMode === "timelapse" ? timelapseReady : true;
+    if (!isReady) return;
+
+    // Wait at least LOADING_MS before transitioning
+    const timer = setTimeout(() => {
+      if (transitionTriggered.current) return;
+      transitionTriggered.current = true;
+      triggerTransition();
+    }, LOADING_MS);
+
+    return () => clearTimeout(timer);
+  }, [visible, phase, timelapseReady, effectiveMode]);
+
+  function triggerTransition() {
+    Animated.parallel([
+      Animated.timing(loadingExitOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(loadingExitScale, {
+        toValue: 0.7,
+        duration: 300,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      triggerMilestoneHaptic();
+      Animated.sequence([
+        Animated.timing(flashOpacity, {
+          toValue: 1,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(flashOpacity, {
+          toValue: 0,
+          duration: 400,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      setPhase("playing");
+      Animated.parallel([
+        Animated.spring(videoEntryScale, {
+          toValue: 1,
+          tension: 45,
+          friction: 9,
+          useNativeDriver: true,
+        }),
+        Animated.timing(videoEntryOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    });
+  }
+
+  // Play sound and animate content when entering playing phase
   useEffect(() => {
-    if (videoReady || videoError) {
+    if (phase === "playing" && !revealSoundPlayed.current) {
+      revealSoundPlayed.current = true;
+      playRevealSound();
       Animated.spring(contentAnim, {
         toValue: 1,
         tension: 50,
@@ -181,26 +399,31 @@ export default function ReelPreviewScreen({
         useNativeDriver: true,
       }).start();
     }
-  }, [videoReady, videoError, contentAnim]);
+  }, [phase, contentAnim]);
+
+  // Cycle through timelapse photos (only when playing)
+  useEffect(() => {
+    if (phase !== "playing" || effectiveMode !== "timelapse" || !timelapseReady || !timelapsePhotos?.length)
+      return;
+
+    const intervalMs = SPEED_MAP[speedPreset];
+    const interval = setInterval(() => {
+      setTimelapseIndex((prev) => {
+        setPrevTimelapseIndex(prev);
+        return (prev + 1) % timelapsePhotos.length;
+      });
+    }, intervalMs);
+
+    return () => clearInterval(interval);
+  }, [phase, effectiveMode, timelapseReady, speedPreset, timelapsePhotos]);
 
   const firstVideoLoaded = useRef(false);
   const latestVideoLoaded = useRef(false);
-
-  useEffect(() => {
-    if (visible) {
-      firstVideoLoaded.current = false;
-      latestVideoLoaded.current = false;
-    }
-  }, [visible]);
 
   function handleFirstPlaybackStatus(status: AVPlaybackStatus) {
     if (!status.isLoaded) return;
     if (!firstVideoLoaded.current) {
       firstVideoLoaded.current = true;
-      if (!videoReady) {
-        setVideoReady(true);
-        playRevealSound();
-      }
     }
   }
 
@@ -242,7 +465,7 @@ export default function ReelPreviewScreen({
       const videoUri = await renderTimelapse();
       if (!videoUri) return;
       try {
-        await Sharing.shareAsync(videoUri, { mimeType: "video/mp4" });
+        await Sharing.shareAsync(videoUri, { mimeType: "video/mp4", dialogTitle: "share your progress" });
       } catch { /* user cancelled */ }
       return;
     }
@@ -256,7 +479,7 @@ export default function ReelPreviewScreen({
         const { uri: downloaded } = await FileSystem.downloadAsync(currentUri, dest);
         localUri = downloaded;
       }
-      await Sharing.shareAsync(localUri, { mimeType: "video/mp4" });
+      await Sharing.shareAsync(localUri, { mimeType: "video/mp4", dialogTitle: "share your progress" });
     } catch { /* user cancelled */ }
   }
 
@@ -298,127 +521,165 @@ export default function ReelPreviewScreen({
     outputRange: [20, 0],
   });
 
+  // Breathing glow scale
+  const breatheScale = breatheAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.15],
+  });
+  const breatheOpacityVal = breatheAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.4, 0.8, 0.4],
+  });
+
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={onClose}>
-    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+    <Modal visible={visible} animationType="none" transparent={false} statusBarTranslucent onRequestClose={onClose}>
+    <Animated.View style={[styles.root, { backgroundColor: bg, opacity: fadeAnim }]}>
       {/* Close button */}
       <Pressable
-        style={[styles.closeButton, { top: insets.top + 4 }]}
-        onPress={() => {
-          triggerSelectionHaptic();
-          onClose();
-        }}
+        style={[styles.closeButton, { top: insets.top + 8, backgroundColor: closeBg }]}
+        onPress={() => { triggerSelectionHaptic(); onClose(); }}
         hitSlop={16}
       >
-        <Text style={styles.closeButtonText}>✕</Text>
+        <Text style={[styles.closeButtonText, { color: textPrimary }]}>✕</Text>
       </Pressable>
 
-      {/* Intention overlay */}
-      {showIntention && goalText ? (
-        <Pressable style={StyleSheet.absoluteFill} onPress={dismissIntention}>
-          <Animated.View style={[styles.intentionOverlay, { opacity: intentionAnim }]}>
-            <Text style={styles.intentionPreamble}>you said you wanted to...</Text>
-            <Text style={styles.intentionText}>{goalText}</Text>
-            <Text style={styles.intentionCta}>watch what happened.</Text>
-          </Animated.View>
-        </Pressable>
+      {/* Intention phase */}
+      {phase === "intention" && goalText ? (
+        <Animated.View style={[styles.intentionOverlay, { backgroundColor: bg, opacity: intentionAnim }]}>
+          <Text style={[styles.intentionPreamble, { color: textSecondary }]}>you said you wanted to...</Text>
+          <Text style={[styles.intentionText, { color: textPrimary }]}>{goalText}</Text>
+          <Text style={[styles.intentionCta, { color: textMuted }]}>watch what happened.</Text>
+        </Animated.View>
       ) : null}
 
-      {/* Main content */}
-      <View
-        style={[
+      {/* Loading phase — cinematic branded sequence */}
+      {phase === "loading" ? (
+        <Animated.View style={[
+          styles.loadingContainer,
+          { opacity: loadingExitOpacity, transform: [{ scale: loadingExitScale }] },
+        ]}>
+          {/* Chapter text */}
+          <Animated.View style={{ opacity: chapterTextOpacity, transform: [{ scale: chapterTextScale }] }}>
+            <Text style={[styles.loadingChapterLabel, { color: textSecondary }]}>
+              {chapterNumber ? `chapter ${chapterNumber}` : "your journey"}
+            </Text>
+          </Animated.View>
+
+          {/* Logo with glow ring */}
+          <View style={styles.logoContainer}>
+            <Animated.View style={[
+              styles.glowRing,
+              {
+                opacity: Animated.multiply(glowOpacity, breatheOpacityVal),
+                transform: [{ scale: Animated.multiply(glowScale, breatheScale) }],
+              },
+            ]} />
+            <Animated.View style={{ opacity: logoOpacity, transform: [{ scale: logoScale }] }}>
+              <LogoMorphLoader size={120} color={ACCENT} duration={900} />
+            </Animated.View>
+          </View>
+
+          {/* Loading text */}
+          <Animated.View style={{ opacity: loadingTextOpacity }}>
+            <Text style={[styles.loadingText, { color: textMuted }]}>building your reveal...</Text>
+          </Animated.View>
+        </Animated.View>
+      ) : null}
+
+      {/* Flash overlay */}
+      <Animated.View
+        style={[styles.flashOverlay, { opacity: flashOpacity, backgroundColor: darkMode ? "#ffffff" : ACCENT }]}
+        pointerEvents="none"
+      />
+
+      {/* Playing phase */}
+      {phase === "playing" ? (
+        <Animated.View style={[
           styles.content,
-          {
-            paddingTop: insets.top + 48,
-            paddingBottom: Math.max(insets.bottom + 12, 28),
-          },
-        ]}
-      >
-        {/* Day label above video */}
-        {effectiveMode === "timelapse" ? (
-          <Animated.View style={[styles.dayLabelRow, { opacity: contentAnim }]}>
-            <Text style={[styles.dayLabel, styles.dayLabelActive]}>
-              {timelapsePhotos?.[timelapseIndex]?.label ?? ""}
-            </Text>
-            <Text style={styles.dayLabelDivider}>·</Text>
-            <Text style={styles.dayLabel}>{timelapsePhotos?.length ?? 0} photos</Text>
-          </Animated.View>
-        ) : (
-          <Animated.View style={[styles.dayLabelRow, { opacity: contentAnim }]}>
-            <Text style={[styles.dayLabel, !showingNow && styles.dayLabelActive]}>day 1</Text>
-            <Text style={styles.dayLabelDivider}>→</Text>
-            <Text style={[styles.dayLabel, showingNow && styles.dayLabelActive]}>
-              day {daySpan}
-            </Text>
-          </Animated.View>
-        )}
-
-        {/* Video frame — tap to toggle */}
-        <TactilePressable
-          style={[styles.videoFrame, { width: finalFrameWidth, height: finalFrameHeight }]}
-          pressScale={0.98}
-          onPress={effectiveMode === "video" ? toggleClip : undefined}
-        >
-          {effectiveMode === "timelapse" && timelapsePhotos?.length ? (
-            <>
-              {/* Previous photo behind as fallback to prevent flash */}
-              <Image
-                source={{ uri: timelapsePhotos[prevTimelapseIndex]?.uri }}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
-                fadeDuration={0}
-              />
-              {/* Current photo on top — instant swap, no unmount */}
-              <Image
-                source={{ uri: timelapsePhotos[timelapseIndex]?.uri }}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
-                fadeDuration={0}
-              />
-            </>
+          { paddingTop: insets.top + 48, paddingBottom: Math.max(insets.bottom + 12, 28) },
+        ]}>
+          {/* Header label */}
+          {effectiveMode === "timelapse" ? (
+            <Animated.View style={[styles.dayLabelRow, { opacity: videoEntryOpacity }]}>
+              <Text style={[styles.dayLabel, { color: ACCENT }]}>
+                {timelapsePhotos?.[timelapseIndex]?.label ?? ""}
+              </Text>
+              <Text style={[styles.dayLabelDivider, { color: textMuted }]}>·</Text>
+              <Text style={[styles.dayLabel, { color: textMuted }]}>{timelapsePhotos?.length ?? 0} photos</Text>
+            </Animated.View>
           ) : (
-            <>
-              {firstClipUri ? (
-                <View style={[StyleSheet.absoluteFill, showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "none" : "auto"}>
-                  <Video
-                    source={{ uri: firstClipUri }}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode={ResizeMode.COVER}
-                    isLooping
-                    isMuted={!purchaseUnlocked}
-                    shouldPlay={visible && !showingNow}
-                    onPlaybackStatusUpdate={handleFirstPlaybackStatus}
-                    onError={() => setVideoError(true)}
-                  />
-                </View>
-              ) : null}
-              {latestClipUri ? (
-                <View style={[StyleSheet.absoluteFill, !showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "auto" : "none"}>
-                  <Video
-                    source={{ uri: latestClipUri }}
-                    style={StyleSheet.absoluteFill}
-                    resizeMode={ResizeMode.COVER}
-                    isLooping
-                    isMuted={!purchaseUnlocked}
-                    shouldPlay={visible && showingNow}
-                    onPlaybackStatusUpdate={handleLatestPlaybackStatus}
-                    onError={() => setVideoError(true)}
-                  />
-                </View>
-              ) : null}
-            </>
+            <Animated.Text style={[
+              styles.chapterLabel,
+              { color: textSecondary, opacity: videoEntryOpacity },
+            ]}>
+              {chapterNumber ? `chapter ${chapterNumber} reveal` : "your reveal"}
+            </Animated.Text>
           )}
-          {(videoError || (!firstClipUri && !latestClipUri && effectiveMode === "video")) ? (
-            <View style={styles.videoErrorOverlay}>
-              <Text style={styles.videoErrorText}>unable to load clip</Text>
-            </View>
-          ) : null}
-        </TactilePressable>
 
-        {/* Toggle + info below video */}
-        {videoReady || videoError ? (
+          {/* Video/Photo frame with scale-up entrance */}
+          <Animated.View style={[
+            styles.videoFrame,
+            {
+              width: frameWidth,
+              height: frameHeight,
+              borderRadius: VIDEO_RADIUS,
+              backgroundColor: videoBg,
+              opacity: videoEntryOpacity,
+              transform: [{ scale: videoEntryScale }],
+            },
+          ]}>
+            {effectiveMode === "timelapse" && timelapsePhotos?.length ? (
+              <>
+                <Image
+                  source={{ uri: timelapsePhotos[prevTimelapseIndex]?.uri }}
+                  style={StyleSheet.absoluteFill}
+                  resizeMode="cover"
+                  fadeDuration={0}
+                />
+                <Image
+                  source={{ uri: timelapsePhotos[timelapseIndex]?.uri }}
+                  style={StyleSheet.absoluteFill}
+                  resizeMode="cover"
+                  fadeDuration={0}
+                />
+              </>
+            ) : (
+              <>
+                {firstClipUri ? (
+                  <View style={[StyleSheet.absoluteFill, showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "none" : "auto"}>
+                    <Video
+                      source={{ uri: firstClipUri }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      isMuted={!purchaseUnlocked}
+                      shouldPlay={visible && phase === "playing" && !showingNow}
+                      onPlaybackStatusUpdate={handleFirstPlaybackStatus}
+                      onError={() => {}}
+                    />
+                  </View>
+                ) : null}
+                {latestClipUri ? (
+                  <View style={[StyleSheet.absoluteFill, !showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "auto" : "none"}>
+                    <Video
+                      source={{ uri: latestClipUri }}
+                      style={StyleSheet.absoluteFill}
+                      resizeMode={ResizeMode.COVER}
+                      isLooping
+                      isMuted={!purchaseUnlocked}
+                      shouldPlay={visible && phase === "playing" && showingNow}
+                      onPlaybackStatusUpdate={handleLatestPlaybackStatus}
+                      onError={() => {}}
+                    />
+                  </View>
+                ) : null}
+              </>
+            )}
+          </Animated.View>
+
+          {/* Bottom content */}
           <Animated.View
             style={[
               styles.bottomSection,
@@ -430,7 +691,7 @@ export default function ReelPreviewScreen({
                 {SPEED_PRESETS.map((preset) => (
                   <TactilePressable
                     key={preset}
-                    style={[styles.speedPill, speedPreset === preset && styles.speedPillActive]}
+                    style={[styles.speedPill, { backgroundColor: pillBg }, speedPreset === preset && styles.speedPillActive]}
                     pressScale={0.95}
                     onPress={() => {
                       triggerSelectionHaptic();
@@ -440,6 +701,7 @@ export default function ReelPreviewScreen({
                     <Text
                       style={[
                         styles.speedPillText,
+                        { color: pillText },
                         speedPreset === preset && styles.speedPillTextActive,
                       ]}
                     >
@@ -450,21 +712,19 @@ export default function ReelPreviewScreen({
               </View>
             ) : (
               <>
-                {/* Toggle pill */}
-                <TactilePressable style={styles.togglePill} pressScale={0.95} onPress={toggleClip}>
+                <TactilePressable style={[styles.togglePill, { backgroundColor: pillBg }]} pressScale={0.95} onPress={toggleClip}>
                   <View style={[styles.toggleOption, !showingNow && styles.toggleOptionActive]}>
-                    <Text style={[styles.toggleText, !showingNow && styles.toggleTextActive]}>
+                    <Text style={[styles.toggleText, { color: pillText }, !showingNow && styles.toggleTextActive]}>
                       day 1
                     </Text>
                   </View>
                   <View style={[styles.toggleOption, showingNow && styles.toggleOptionActive]}>
-                    <Text style={[styles.toggleText, showingNow && styles.toggleTextActive]}>
+                    <Text style={[styles.toggleText, { color: pillText }, showingNow && styles.toggleTextActive]}>
                       now
                     </Text>
                   </View>
                 </TactilePressable>
-
-                <Text style={styles.tapHint}>tap video to switch</Text>
+                <Text style={[styles.tapHint, { color: textMuted }]}>tap video to switch</Text>
               </>
             )}
 
@@ -477,7 +737,7 @@ export default function ReelPreviewScreen({
                   pressScale={0.96}
                   onPress={() => { void handleShare(); }}
                 >
-                  <Text style={styles.shareButtonText}>{exporting ? "rendering..." : "share to tiktok"}</Text>
+                  <Text style={styles.shareButtonText}>{exporting ? "rendering..." : "share"}</Text>
                 </TactilePressable>
                 <TactilePressable
                   style={styles.saveLink}
@@ -485,14 +745,14 @@ export default function ReelPreviewScreen({
                   onPress={() => { void handleSave(); }}
                   disabled={saveState === "saving"}
                 >
-                  <Text style={styles.saveLinkText}>
-                    {saveState === "idle" ? "save to camera roll" : saveState === "saving" ? "saving..." : "saved ✓"}
+                  <Text style={[styles.saveLinkText, { color: textMuted }]}>
+                    {saveState === "idle" ? "save to camera roll" : saveState === "saving" ? "saving..." : "saved"}
                   </Text>
                 </TactilePressable>
               </View>
             ) : (
               <TactilePressable
-                style={styles.unlockPill}
+                style={styles.unlockButton}
                 stretch
                 pressScale={0.96}
                 onPress={() => {
@@ -500,12 +760,12 @@ export default function ReelPreviewScreen({
                   setPaywallVisible(true);
                 }}
               >
-                <Text style={styles.unlockPillText}>🔇 unlock audio + export</Text>
+                <Text style={styles.shareButtonText}>unlock audio + export</Text>
               </TactilePressable>
             )}
           </Animated.View>
-        ) : null}
-      </View>
+        </Animated.View>
+      ) : null}
 
       <PaywallModal
         visible={paywallVisible}
@@ -523,11 +783,6 @@ export default function ReelPreviewScreen({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#f4efe6",
-  },
-  content: {
-    flex: 1,
-    alignItems: "center",
   },
   closeButton: {
     position: "absolute",
@@ -535,57 +790,150 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.06)",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 10,
   },
   closeButtonText: {
-    color: "#101010",
     fontSize: 16,
     fontWeight: "700",
     lineHeight: 18,
+  },
+  // Intention phase
+  intentionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    zIndex: 50,
+  },
+  intentionPreamble: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  intentionText: {
+    fontSize: 24,
+    fontWeight: "400",
+    fontStyle: "italic",
+    textAlign: "center",
+    lineHeight: 34,
+    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+  },
+  intentionCta: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 24,
+    textAlign: "center",
+  },
+  // Loading phase — cinematic
+  loadingContainer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 28,
+    zIndex: 5,
+  },
+  loadingChapterLabel: {
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    fontFamily: Platform.OS === "ios" ? "AvenirNext-Bold" : "sans-serif-medium",
+  },
+  logoContainer: {
+    width: 160,
+    height: 160,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  glowRing: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: ACCENT,
+    shadowColor: ACCENT,
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  loadingText: {
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+  // Flash overlay
+  flashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+  },
+  // Playing phase
+  content: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  chapterLabel: {
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 12,
+    letterSpacing: 0.5,
   },
   dayLabelRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   dayLabel: {
     fontSize: 16,
     fontWeight: "700",
-    color: "rgba(0,0,0,0.2)",
-  },
-  dayLabelActive: {
-    color: ACCENT_ORANGE,
-    fontSize: 18,
   },
   dayLabelDivider: {
     fontSize: 14,
-    color: "rgba(0,0,0,0.15)",
     fontWeight: "600",
   },
   videoFrame: {
-    borderRadius: VIDEO_BORDER_RADIUS,
     overflow: "hidden",
-    backgroundColor: "#e8e2d8",
     shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    elevation: 12,
   },
   bottomSection: {
     alignItems: "center",
     alignSelf: "stretch",
     paddingTop: 20,
-    paddingHorizontal: 24,
+    paddingHorizontal: 4,
     gap: 4,
+  },
+  speedControlRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  speedPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+  },
+  speedPillActive: {
+    backgroundColor: ACCENT,
+  },
+  speedPillText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  speedPillTextActive: {
+    color: "#ffffff",
   },
   togglePill: {
     flexDirection: "row",
-    backgroundColor: "rgba(0,0,0,0.04)",
     borderRadius: 20,
     padding: 3,
   },
@@ -595,12 +943,11 @@ const styles = StyleSheet.create({
     borderRadius: 17,
   },
   toggleOptionActive: {
-    backgroundColor: ACCENT_ORANGE,
+    backgroundColor: ACCENT,
   },
   toggleText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "rgba(0,0,0,0.3)",
   },
   toggleTextActive: {
     color: "#ffffff",
@@ -608,72 +955,6 @@ const styles = StyleSheet.create({
   tapHint: {
     fontSize: 12,
     fontWeight: "500",
-    color: "rgba(0,0,0,0.15)",
-  },
-  unlockPill: {
-    width: "100%",
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: ACCENT_ORANGE,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  unlockPillText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  intentionOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#f4efe6",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-    zIndex: 50,
-  },
-  intentionPreamble: {
-    color: "rgba(0,0,0,0.35)",
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  intentionText: {
-    color: "#101010",
-    fontSize: 24,
-    fontWeight: "400",
-    fontStyle: "italic",
-    textAlign: "center",
-    lineHeight: 34,
-    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
-  },
-  intentionCta: {
-    color: "rgba(0,0,0,0.25)",
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 24,
-    textAlign: "center",
-  },
-  speedControlRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  speedPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.04)",
-  },
-  speedPillActive: {
-    backgroundColor: ACCENT_ORANGE,
-  },
-  speedPillText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "rgba(0,0,0,0.3)",
-  },
-  speedPillTextActive: {
-    color: "#ffffff",
   },
   exportRow: {
     width: "100%",
@@ -684,7 +965,15 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 54,
     borderRadius: 27,
-    backgroundColor: ACCENT_ORANGE,
+    backgroundColor: ACCENT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unlockButton: {
+    width: "100%",
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: ACCENT,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -698,31 +987,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   saveLinkText: {
-    color: "rgba(0,0,0,0.3)",
     fontSize: 13,
     fontWeight: "600",
-  },
-  videoErrorOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  videoErrorText: {
-    color: "rgba(0,0,0,0.3)",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  timelapseLabelWrap: {
-    position: "absolute",
-    bottom: 16,
-    left: 16,
-  },
-  timelapseLabel: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 });

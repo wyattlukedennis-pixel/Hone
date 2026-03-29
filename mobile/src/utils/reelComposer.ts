@@ -41,20 +41,24 @@ export async function composeReel(params: {
     if (__DEV__) console.log("[reelComposer] Uploading local clips...");
     const localUris = await getAllClipLocalUris();
 
-    const uploadPromises = clips
-      .filter((clip) => localUris[clip.id])
-      .map((clip) =>
-        uploadLocalClipForRender(token, journeyId, {
-          id: clip.id,
-          captureType: clip.captureType,
-          durationMs: clip.durationMs,
-          recordedAt: clip.recordedAt,
-          recordedOn: clip.recordedOn,
-        }, localUris[clip.id]!).catch((error) => {
-          if (__DEV__) console.warn(`[reelComposer] Upload failed for clip ${clip.id}:`, error);
-        })
+    const clipsToUpload = clips.filter((clip) => localUris[clip.id]);
+    // Upload 3 at a time to avoid overwhelming the server
+    for (let i = 0; i < clipsToUpload.length; i += 3) {
+      const batch = clipsToUpload.slice(i, i + 3);
+      await Promise.all(
+        batch.map((clip) =>
+          uploadLocalClipForRender(token, journeyId, {
+            id: clip.id,
+            captureType: clip.captureType,
+            durationMs: clip.durationMs,
+            recordedAt: clip.recordedAt,
+            recordedOn: clip.recordedOn,
+          }, localUris[clip.id]!).catch((error) => {
+            if (__DEV__) console.warn(`[reelComposer] Upload failed for clip ${clip.id}:`, error);
+          })
+        )
       );
-    await Promise.all(uploadPromises);
+    }
 
     // 2. Request server-side composition
     if (__DEV__) console.log("[reelComposer] Requesting server render...");
@@ -96,7 +100,7 @@ export async function composeReel(params: {
     if (__DEV__) console.log("[reelComposer] Composition ready:", outputPath);
     return download.uri;
   } catch (error) {
-    if (__DEV__) console.error("[reelComposer] Composition failed:", error);
+    if (__DEV__) console.warn("[reelComposer] Composition failed (non-blocking):", error);
     return null;
   }
 }
