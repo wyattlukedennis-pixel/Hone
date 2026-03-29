@@ -14,6 +14,15 @@
     "preview": {
       "distribution": "internal"
     },
+    "testflight": {
+      "autoIncrement": true,
+      "distribution": "store",
+      "env": {
+        "EXPO_PUBLIC_REVENUECAT_API_KEY": "appl_AWnIImITlPyyoEFWnwclLzxggGM",
+        "EXPO_PUBLIC_TESTFLIGHT": "1"
+      },
+      "ios": {}
+    },
     "production": {
       "autoIncrement": true,
       "env": {

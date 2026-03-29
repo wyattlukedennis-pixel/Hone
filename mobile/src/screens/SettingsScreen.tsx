@@ -15,6 +15,7 @@ import { formatDailyMomentTime } from "../utils/dailyMoment";
 import { clearOnboardingDraft } from "../storage/onboardingStorage";
 import { hasRevealExportPurchase, purchaseRevealExport, resetPurchaseState } from "../utils/purchases";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { showDevTools } from "../utils/environment";
 
 type SettingsScreenProps = {
   user: User;
@@ -61,7 +62,7 @@ export function SettingsScreen({
   onDarkModeChange
 }: SettingsScreenProps) {
   const insets = useSafeAreaInsets();
-  const isDevToolsVisible = __DEV__ && devDateShiftSettings;
+  const isDevToolsVisible = showDevTools() && devDateShiftSettings;
   const [clearingRecordings, setClearingRecordings] = useState(false);
   const [devMessage, setDevMessage] = useState<{ text: string; success: boolean } | null>(null);
   const [, setPendingUploadsCount] = useState(0);
