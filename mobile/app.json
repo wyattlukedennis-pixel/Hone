@@ -13,7 +13,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hone.mobile",
+      "bundleIdentifier": "com.wyattdennis.hone",
       "icon": "./src/assets/logo.png",
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -24,7 +24,7 @@
       }
     },
     "android": {
-      "package": "com.hone.mobile"
+      "package": "com.wyattdennis.hone"
     },
     "plugins": [
       "expo-secure-store",
