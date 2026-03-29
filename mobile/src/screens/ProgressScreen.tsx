@@ -221,7 +221,7 @@ export function ProgressScreen({
     }
     return stories;
   }, [reveals, revealReplayPlans]);
-  const sortedReveals = useMemo(() => [...reveals].sort((a, b) => a.chapterNumber - b.chapterNumber), [reveals]);
+
   const historyModalBackdropOpacity = historyModalDragY.interpolate({
     inputRange: [0, 220],
     outputRange: [1, 0.86],

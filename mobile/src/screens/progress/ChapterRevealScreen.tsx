@@ -22,7 +22,7 @@ import { hasRevealExportPurchase } from "../../utils/purchases";
 import { composeReel } from "../../utils/reelComposer";
 import type { ExportReelInput } from "../../utils/reelExport";
 import type { Clip } from "../../types/clip";
-import { theme } from "../../theme";
+
 import type { ReelClipEntry } from "../../components/SequentialReelPlayer";
 
 type ChapterRevealScreenProps = {

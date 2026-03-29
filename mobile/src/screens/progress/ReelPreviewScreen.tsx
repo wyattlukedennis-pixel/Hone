@@ -83,7 +83,7 @@ export default function ReelPreviewScreen({
   visible,
   firstClipUri,
   latestClipUri,
-  daySpan,
+  daySpan: _daySpan,
   chapterNumber,
   goalText,
   darkMode = false,
@@ -212,8 +212,6 @@ export default function ReelPreviewScreen({
       ])
     );
     breatheLoop.start();
-
-    const baseDelay = goalText ? 3000 : 0;
 
     // Show intention first if goalText exists
     if (goalText) {

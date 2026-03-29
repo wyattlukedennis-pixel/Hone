@@ -1,7 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, type ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { trackEvent } from "./analytics/events";
