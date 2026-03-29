@@ -177,6 +177,12 @@ export async function resetPurchaseState(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY);
 }
 
+/** Simulate a purchase locally (dev/testflight tools only). */
+export async function simulatePurchase(): Promise<void> {
+  _purchased = true;
+  await AsyncStorage.setItem(STORAGE_KEY, "true");
+}
+
 /** Get display price string. */
 export function getRevealExportPrice(): string {
   if (_package?.product?.priceString) {

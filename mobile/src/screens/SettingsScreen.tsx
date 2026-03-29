@@ -13,7 +13,7 @@ import type { DevDateShiftSettings } from "../types/devTools";
 import type { HapticsMode } from "../types/haptics";
 import { formatDailyMomentTime } from "../utils/dailyMoment";
 import { clearOnboardingDraft } from "../storage/onboardingStorage";
-import { hasRevealExportPurchase, purchaseRevealExport, resetPurchaseState } from "../utils/purchases";
+import { hasRevealExportPurchase, resetPurchaseState, simulatePurchase } from "../utils/purchases";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { showDevTools } from "../utils/environment";
 
@@ -357,7 +357,7 @@ export function SettingsScreen({
                 await resetPurchaseState();
                 setDevMessage({ text: "switched to free tier", success: true });
               } else {
-                await purchaseRevealExport();
+                await simulatePurchase();
                 setDevMessage({ text: "switched to paid tier", success: true });
               }
             }}
