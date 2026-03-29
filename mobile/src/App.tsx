@@ -1,7 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { trackEvent } from "./analytics/events";
@@ -88,6 +88,33 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [tab, setTab] = useState<TabKey>("journeys");
+  const { width: screenWidth } = useWindowDimensions();
+  const tabOrder: TabKey[] = useMemo(() => ["journeys", "progress", "settings"], []);
+  const tabScrollRef = useRef<ScrollView>(null);
+  const tabScrollX = useRef(new Animated.Value(0)).current;
+  const tabSetBySwipeRef = useRef(false);
+
+  // Scroll to tab position when tab changes via TabBar tap
+  useEffect(() => {
+    if (tabSetBySwipeRef.current) {
+      tabSetBySwipeRef.current = false;
+      return;
+    }
+    const idx = tabOrder.indexOf(tab);
+    tabScrollRef.current?.scrollTo({ x: idx * screenWidth, animated: true });
+  }, [tab, screenWidth, tabOrder]);
+
+  const handleTabScrollEnd = useMemo(() => {
+    return (e: { nativeEvent: { contentOffset: { x: number } } }) => {
+      const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+      const newTab = tabOrder[idx];
+      if (newTab) {
+        tabSetBySwipeRef.current = true;
+        setTab(newTab);
+      }
+    };
+  }, [screenWidth, tabOrder]);
+
   const [activeJourneyId, setActiveJourneyId] = useState<string | null>(null);
   const [devDateShiftSettings, setDevDateShiftSettings] = useState<DevDateShiftSettings>(defaultDevDateShiftSettings);
   const [dailyMomentSettings, setDailyMomentSettings] = useState<DailyMomentSettings>(defaultDailyMomentSettings);
@@ -184,7 +211,7 @@ export default function App() {
         useNativeDriver: true
       })
     ]).start();
-  }, [reducedMotion, screenOpacity, screenScale, screenTranslateY, session, tab]);
+  }, [reducedMotion, screenOpacity, screenScale, screenTranslateY, session]);
 
   useEffect(() => {
     if (tab === "progress" && previousTabRef.current !== "progress") {
@@ -726,17 +753,31 @@ export default function App() {
               ]}
             >
               {session ? (
-                <>
-                  <View style={tab === "journeys" ? styles.tabVisible : styles.tabHidden}>
+                <Animated.ScrollView
+                  ref={tabScrollRef}
+                  horizontal
+                  pagingEnabled
+                  bounces={false}
+                  showsHorizontalScrollIndicator={false}
+                  scrollEventThrottle={16}
+                  onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { x: tabScrollX } } }],
+                    { useNativeDriver: true }
+                  )}
+                  onMomentumScrollEnd={handleTabScrollEnd}
+                  style={styles.tabSwipeContainer}
+                  contentContainerStyle={styles.tabStrip}
+                >
+                  <View style={[styles.tabPane, { width: screenWidth }]}>
                     {journeysContent}
                   </View>
-                  <View style={tab === "progress" ? styles.tabVisible : styles.tabHidden}>
+                  <View style={[styles.tabPane, { width: screenWidth }]}>
                     {progressContent}
                   </View>
-                  <View style={tab === "settings" ? styles.tabVisible : styles.tabHidden}>
+                  <View style={[styles.tabPane, { width: screenWidth }]}>
                     {settingsContent}
                   </View>
-                </>
+                </Animated.ScrollView>
               ) : onboardingDone ? (
                 <AuthScreen
                   mode={authMode}
@@ -765,7 +806,7 @@ export default function App() {
                 />
               )}
             </Animated.View>
-            {session && !progressFullscreen ? <TabBar activeTab={tab} onSelect={setTab} darkMode={darkMode} /> : null}
+            {session && !progressFullscreen ? <TabBar activeTab={tab} onSelect={setTab} darkMode={darkMode} scrollX={tabScrollX} screenWidth={screenWidth} /> : null}
             <StatusBar style={darkMode ? "light" : "dark"} />
           </SafeAreaView>
         )}
@@ -778,12 +819,14 @@ const styles = StyleSheet.create({
   app: {
     flex: 1
   },
-  tabVisible: {
+  tabSwipeContainer: {
     flex: 1,
   },
-  tabHidden: {
-    flex: 1,
-    display: "none",
+  tabStrip: {
+    height: "100%",
+  },
+  tabPane: {
+    height: "100%",
   },
   safeArea: {
     flex: 1

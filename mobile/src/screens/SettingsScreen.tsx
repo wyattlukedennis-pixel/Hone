@@ -3,6 +3,7 @@ import { Alert, Linking, Modal, ScrollView, StyleSheet, Text, View } from "react
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import * as Notifications from "expo-notifications";
 import { TactilePressable } from "../components/TactilePressable";
 import { TimeWheelPicker } from "../components/TimeWheelPicker";
 import { theme } from "../theme";
@@ -363,6 +364,25 @@ export function SettingsScreen({
             <Text style={[styles.devAccentChipText, { fontSize: 13 }]}>
               {hasRevealExportPurchase() ? "paid — tap to switch to free" : "free — tap to switch to paid"}
             </Text>
+          </TactilePressable>
+          <TactilePressable
+            style={[styles.devAccentChip, { marginTop: 4 }]}
+            onPress={async () => {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: "it's your moment.",
+                  body: "drop today's clip before the day slips.",
+                  data: { honeAction: "open_recorder", source: "daily_moment" },
+                },
+                trigger: {
+                  type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+                  seconds: 5,
+                },
+              });
+              setDevMessage({ text: "test notification in 5 seconds — background the app!", success: true });
+            }}
+          >
+            <Text style={styles.devAccentChipText}>test notification (5s)</Text>
           </TactilePressable>
           {devMessage ? <Text style={[{ marginTop: 8, fontWeight: "600" }, devMessage.success ? { color: theme.colors.success } : { color: theme.colors.danger }]}>{devMessage.text}</Text> : null}
         </Card>

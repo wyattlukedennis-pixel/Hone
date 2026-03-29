@@ -40,8 +40,8 @@ type UseProgressStateParams = {
 function toProgressErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : "Unexpected error";
   if (raw === "UNAUTHORIZED") return "Session expired. Please log in again.";
-  if (raw === "BACKEND_MIGRATION_REQUIRED") return "Backend schema is outdated. Restart backend and run migrations.";
-  if (raw === "Internal Server Error") return "Backend error. Check backend logs and restart the API.";
+  if (raw === "BACKEND_MIGRATION_REQUIRED") return "Something went wrong. Please try again later.";
+  if (raw === "Internal Server Error") return "Something went wrong. Please try again later.";
   if (raw.startsWith("Network request failed")) return raw;
   return raw;
 }

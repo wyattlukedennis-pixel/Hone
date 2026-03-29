@@ -15,8 +15,8 @@ export function formatDurationMs(ms: number) {
 export function toJourneyErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : "Unexpected error";
   if (raw === "UNAUTHORIZED") return "Session expired. Please login again.";
-  if (raw === "BACKEND_MIGRATION_REQUIRED") return "Backend schema is outdated. Restart backend and run migrations.";
-  if (raw === "Internal Server Error") return "Backend error. Check backend logs and restart the API.";
+  if (raw === "BACKEND_MIGRATION_REQUIRED") return "Something went wrong. Please try again later.";
+  if (raw === "Internal Server Error") return "Something went wrong. Please try again later.";
   if (raw === "TITLE_REQUIRED") return "Title is required.";
   if (raw === "TITLE_TOO_LONG") return "Title must be 120 characters or fewer.";
   if (raw === "INVALID_MILESTONE_LENGTH") return "Choose 7, 14, 30, or 100 days.";

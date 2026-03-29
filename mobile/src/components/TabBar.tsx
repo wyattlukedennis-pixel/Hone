@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -6,12 +6,13 @@ import { GlassSurface } from "./GlassSurface";
 import { theme } from "../theme";
 import type { TabKey } from "../types/navigation";
 import { triggerSelectionHaptic } from "../utils/feedback";
-import { useReducedMotion } from "../utils/useReducedMotion";
 
 type TabBarProps = {
   activeTab: TabKey;
   onSelect: (tab: TabKey) => void;
   darkMode?: boolean;
+  scrollX?: Animated.Value;
+  screenWidth?: number;
 };
 
 const tabs: Array<{ key: TabKey; label: string }> = [
@@ -20,34 +21,23 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "settings", label: "manage" }
 ];
 
-export function TabBar({ activeTab, onSelect, darkMode }: TabBarProps) {
+export function TabBar({ activeTab, onSelect, darkMode, scrollX, screenWidth }: TabBarProps) {
   const [width, setWidth] = useState(0);
-  const reducedMotion = useReducedMotion();
-  const indicatorX = useRef(new Animated.Value(0)).current;
-
-  const activeIndex = useMemo(() => {
-    const index = tabs.findIndex((tab) => tab.key === activeTab);
-    return index >= 0 ? index : 0;
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (!width) return;
-    const tabWidth = width / tabs.length;
-    if (reducedMotion) {
-      indicatorX.setValue(tabWidth * activeIndex);
-      return;
-    }
-    Animated.spring(indicatorX, {
-      toValue: tabWidth * activeIndex,
-      damping: 14,
-      stiffness: 180,
-      mass: 0.6,
-      useNativeDriver: true
-    }).start();
-  }, [activeIndex, indicatorX, reducedMotion, width]);
 
   const tabWidth = width ? width / tabs.length : 0;
   const indicatorWidth = Math.max(tabWidth - 10, 0);
+
+  // Map scroll position to indicator position
+  const indicatorTranslateX = useMemo(() => {
+    if (!scrollX || !screenWidth || !tabWidth) return new Animated.Value(0);
+    // scrollX goes 0 → screenWidth → screenWidth*2
+    // indicator should go 0 → tabWidth → tabWidth*2
+    return scrollX.interpolate({
+      inputRange: [0, screenWidth, screenWidth * 2],
+      outputRange: [0, tabWidth, tabWidth * 2],
+      extrapolate: "clamp",
+    });
+  }, [scrollX, screenWidth, tabWidth]);
 
   return (
     <View style={styles.safeWrap}>
@@ -61,7 +51,7 @@ export function TabBar({ activeTab, onSelect, darkMode }: TabBarProps) {
           {tabWidth ? (
             <Animated.View
               pointerEvents="none"
-              style={[styles.indicatorShell, { width: indicatorWidth, transform: [{ translateX: indicatorX }] }]}
+              style={[styles.indicatorShell, { width: indicatorWidth, transform: [{ translateX: indicatorTranslateX }] }]}
             >
               <LinearGradient
                 colors={theme.gradients.tabIndicator}

@@ -75,8 +75,8 @@ export async function scheduleDailyMomentNotification(settings: DailyMomentSetti
 
   const identifier = await Notifications.scheduleNotificationAsync({
     content: {
-      title: "Show up for your practice.",
-      body: "Your Daily Moment is ready. Record today's clip.",
+      title: "it's your moment.",
+      body: "drop today's clip before the day slips.",
       data: {
         honeAction: "open_recorder",
         source: "daily_moment"

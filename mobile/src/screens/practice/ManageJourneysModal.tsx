@@ -1,7 +1,7 @@
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-
 import { GlassSurface } from "../../components/GlassSurface";
+
 import { theme } from "../../theme";
 import type { Clip } from "../../types/clip";
 import type { Journey } from "../../types/journey";
