@@ -1099,7 +1099,7 @@ export function ProgressScreen({
                         }}
                       >
                         <Text style={[styles.revealCapsulePrimaryText, compactMode ? styles.revealCapsulePrimaryTextCompact : null]}>
-                          {compareReady ? "open compare" : didPracticeToday ? "retake" : "record"}
+                          {compareReady ? "open compare" : didPracticeToday ? "retake" : selectedJourney.captureMode === "photo" ? "capture" : "record"}
                         </Text>
                       </TactilePressable>
                     )}

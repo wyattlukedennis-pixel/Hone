@@ -218,7 +218,7 @@ export function JourneysScreen({
     ? "watch reveal"
     : practicedToday
       ? "retake"
-      : "record";
+      : activeJourney?.captureMode === "photo" ? "capture" : "record";
   // Latest clip thumbnail for hero background
   const latestClipThumbnail = useMemo(() => {
     if (!activeJourneyClips.length) return null;

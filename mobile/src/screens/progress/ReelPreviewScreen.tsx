@@ -304,15 +304,25 @@ export default function ReelPreviewScreen({
     }
   }, [visible]);
 
-  // Prefetch timelapse images during loading phase
+  // Prefetch timelapse images during loading phase, filtering out failures
+  const [loadedPhotos, setLoadedPhotos] = useState<Array<{ uri: string; label: string }>>([]);
   useEffect(() => {
     if (!visible || effectiveMode !== "timelapse" || !timelapsePhotos?.length) return;
 
-    Promise.all(timelapsePhotos.map((p) => Image.prefetch(p.uri)))
-      .then(() => setTimelapseReady(true))
-      .catch(() => setTimelapseReady(true));
+    Promise.all(
+      timelapsePhotos.map((p) =>
+        Image.prefetch(p.uri).then(() => p).catch(() => null)
+      )
+    ).then((results) => {
+      const valid = results.filter((r): r is { uri: string; label: string } => r !== null);
+      setLoadedPhotos(valid.length > 0 ? valid : timelapsePhotos);
+      setTimelapseReady(true);
+    });
 
-    return () => setTimelapseReady(false);
+    return () => {
+      setTimelapseReady(false);
+      setLoadedPhotos([]);
+    };
   }, [visible, effectiveMode, timelapsePhotos]);
 
   // Trigger transition when content is ready
@@ -399,20 +409,36 @@ export default function ReelPreviewScreen({
   }, [phase, contentAnim]);
 
   // Cycle through timelapse photos (only when playing)
+  // First and last photos hold for 2s, middle photos use speed preset
+  const timelapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (phase !== "playing" || effectiveMode !== "timelapse" || !timelapseReady || !timelapsePhotos?.length)
+    if (phase !== "playing" || effectiveMode !== "timelapse" || !timelapseReady || !loadedPhotos.length)
       return;
 
+    const total = loadedPhotos.length;
     const intervalMs = SPEED_MAP[speedPreset];
-    const interval = setInterval(() => {
-      setTimelapseIndex((prev) => {
-        setPrevTimelapseIndex(prev);
-        return (prev + 1) % timelapsePhotos.length;
-      });
-    }, intervalMs);
+    const HOLD_MS = 2000;
 
-    return () => clearInterval(interval);
-  }, [phase, effectiveMode, timelapseReady, speedPreset, timelapsePhotos]);
+    function scheduleNext(current: number) {
+      const isFirst = current === 0;
+      const isLast = current === total - 1;
+      const delay = isFirst || isLast ? HOLD_MS : intervalMs;
+
+      timelapseTimerRef.current = setTimeout(() => {
+        const next = (current + 1) % total;
+        // When looping back to 0, set prev to 0 to avoid flash of last photo behind first
+        setPrevTimelapseIndex(next === 0 ? 0 : current);
+        setTimelapseIndex(next);
+        scheduleNext(next);
+      }, delay);
+    }
+
+    scheduleNext(timelapseIndex);
+
+    return () => {
+      if (timelapseTimerRef.current) clearTimeout(timelapseTimerRef.current);
+    };
+  }, [phase, effectiveMode, timelapseReady, speedPreset, loadedPhotos]);
 
   const firstVideoLoaded = useRef(false);
   const latestVideoLoaded = useRef(false);
@@ -569,10 +595,10 @@ export default function ReelPreviewScreen({
           {effectiveMode === "timelapse" ? (
             <Animated.View style={[styles.dayLabelRow, { opacity: videoEntryOpacity }]}>
               <Text style={[styles.dayLabel, { color: ACCENT }]}>
-                {timelapsePhotos?.[timelapseIndex]?.label ?? ""}
+                {loadedPhotos[timelapseIndex]?.label ?? ""}
               </Text>
               <Text style={[styles.dayLabelDivider, { color: textMuted }]}>·</Text>
-              <Text style={[styles.dayLabel, { color: textMuted }]}>{timelapsePhotos?.length ?? 0} photos</Text>
+              <Text style={[styles.dayLabel, { color: textMuted }]}>{loadedPhotos.length} photos</Text>
             </Animated.View>
           ) : (
             <Animated.Text style={[
@@ -595,16 +621,16 @@ export default function ReelPreviewScreen({
               transform: [{ scale: videoEntryScale }],
             },
           ]}>
-            {effectiveMode === "timelapse" && timelapsePhotos?.length ? (
+            {effectiveMode === "timelapse" && loadedPhotos.length ? (
               <>
                 <Image
-                  source={{ uri: timelapsePhotos[prevTimelapseIndex]?.uri }}
+                  source={{ uri: loadedPhotos[prevTimelapseIndex]?.uri }}
                   style={StyleSheet.absoluteFill}
                   resizeMode="cover"
                   fadeDuration={0}
                 />
                 <Image
-                  source={{ uri: timelapsePhotos[timelapseIndex]?.uri }}
+                  source={{ uri: loadedPhotos[timelapseIndex]?.uri }}
                   style={StyleSheet.absoluteFill}
                   resizeMode="cover"
                   fadeDuration={0}
