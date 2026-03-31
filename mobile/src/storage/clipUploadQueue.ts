@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { createClipLocal } from "../api/clips";
+import { uploadLocalClipForRender } from "../api/clips";
 import { persistClipFile, registerClipLocalUri } from "./clipFileStore";
 
 const CLIP_UPLOAD_QUEUE_KEY = "hone.clips.uploadQueue.v1";
@@ -226,15 +226,16 @@ export async function processClipUploadQueue(token: string, options: ProcessQueu
         await updateItem({ status: "processing" });
         emit({ type: "status", itemId: item.id, journeyId: item.journeyId, status: "processing" });
 
-        // Create metadata record on backend (no file upload)
-        const response = await createClipLocal(token, item.journeyId, {
+        // Upload file to cloud storage and create clip record
+        const response = await uploadLocalClipForRender(token, item.journeyId, {
+          id: "",
+          captureType: item.captureType,
           durationMs: item.durationMs,
           recordedAt: item.recordedAt,
           recordedOn: item.recordedOn,
-          captureType: item.captureType
-        });
+        }, localUri);
 
-        // Map the server-assigned clip ID to the local file
+        // Map the server-assigned clip ID to the local file for instant playback
         await registerClipLocalUri(response.clip.id, localUri);
 
         await updateItem({ status: "ready" });

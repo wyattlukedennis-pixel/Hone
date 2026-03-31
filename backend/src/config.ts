@@ -37,7 +37,7 @@ export const config = {
     maxFileSizeBytes: Number(env.UPLOAD_MAX_FILE_SIZE_BYTES ?? String(100 * 1024 * 1024)) // 100MB default
   },
   media: {
-    rawBucket: env.MEDIA_RAW_BUCKET ?? "",
+    rawBucket: env.MEDIA_RAW_BUCKET ?? env.BUCKET_NAME ?? "",
     processedBucket: env.MEDIA_PROCESSED_BUCKET ?? "",
     cdnBaseUrl: env.MEDIA_CDN_BASE_URL ?? ""
   },

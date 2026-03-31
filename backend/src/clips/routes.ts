@@ -10,6 +10,7 @@ import { requireAuth } from "../auth/guard.js";
 import { config } from "../config.js";
 import { getPool } from "../db/pool.js";
 import { findJourneyByIdForUser } from "../journeys/repository.js";
+import { isS3Configured, uploadToS3, getPublicUrl } from "../storage/s3.js";
 import {
   createClipUpload,
   deleteClipsForJourney,
@@ -106,12 +107,15 @@ export function registerClipRoutes(app: FastifyInstance) {
     });
 
     const baseUrl = getBaseUrl(request.protocol, request.headers.host);
+    const mediaUrl = isS3Configured()
+      ? getPublicUrl(config.media.rawBucket, upload.objectKey)
+      : `${baseUrl}/media/${upload.objectKey}`;
     return reply.code(201).send({
       uploadId: upload.id,
       uploadUrl: `${baseUrl}/uploads/${upload.id}`,
       uploadMethod: "POST",
       fileField: "file",
-      mediaUrl: `${baseUrl}/media/${upload.objectKey}`
+      mediaUrl
     });
   });
 
@@ -131,20 +135,28 @@ export function registerClipRoutes(app: FastifyInstance) {
     const file = await request.file();
     if (!file) return reply.code(400).send({ error: "FILE_REQUIRED" });
 
-    const absolutePath = path.resolve(config.uploads.dir, upload.objectKey);
-    if (!absolutePath.startsWith(config.uploads.dir)) {
-      return reply.code(400).send({ error: "INVALID_UPLOAD_PATH" });
+    if (isS3Configured()) {
+      // Upload to Tigris/S3
+      const chunks: Buffer[] = [];
+      for await (const chunk of file.file) { chunks.push(chunk as Buffer); }
+      const body = Buffer.concat(chunks);
+      await uploadToS3(config.media.rawBucket, upload.objectKey, body, upload.mimeType);
+    } else {
+      // Fallback: write to local disk (dev only)
+      const absolutePath = path.resolve(config.uploads.dir, upload.objectKey);
+      if (!absolutePath.startsWith(config.uploads.dir)) {
+        return reply.code(400).send({ error: "INVALID_UPLOAD_PATH" });
+      }
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await pipeline(file.file, createWriteStream(absolutePath));
     }
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await pipeline(file.file, createWriteStream(absolutePath));
 
     await markClipUploadUploaded(pool, upload.id);
 
-    const baseUrl = getBaseUrl(request.protocol, request.headers.host);
-    return reply.send({
-      success: true,
-      mediaUrl: `${baseUrl}/media/${upload.objectKey}`
-    });
+    const mediaUrl = isS3Configured()
+      ? getPublicUrl(config.media.rawBucket, upload.objectKey)
+      : `${getBaseUrl(request.protocol, request.headers.host)}/media/${upload.objectKey}`;
+    return reply.send({ success: true, mediaUrl });
   });
 
   app.post<{ Params: JourneyParams; Body: CreateClipBody }>("/journeys/:journeyId/clips", async (request, reply) => {
@@ -187,14 +199,16 @@ export function registerClipRoutes(app: FastifyInstance) {
     }
     const recordedOn = normalizedRecordedOn ?? recordedAt.toISOString().slice(0, 10);
 
-    const baseUrl = getBaseUrl(request.protocol, request.headers.host);
+    const videoUrl = isS3Configured()
+      ? getPublicUrl(config.media.rawBucket, upload.objectKey)
+      : `${getBaseUrl(request.protocol, request.headers.host)}/media/${upload.objectKey}`;
     const clip = await upsertClipFromUpload(pool, {
       journeyId: journey.id,
       recordedOn,
       recordedAt,
       durationMs: Math.round(durationMs),
       captureType: upload.captureType,
-      videoUrl: `${baseUrl}/media/${upload.objectKey}`
+      videoUrl
     });
 
     return reply.code(201).send({ clip });

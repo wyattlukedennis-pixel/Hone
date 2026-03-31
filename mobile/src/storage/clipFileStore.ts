@@ -151,6 +151,41 @@ export async function clearLocalClipsForJourney(journeyId: string): Promise<void
   }
 }
 
+/**
+ * Download a clip from a remote URL if no local file exists.
+ * Used to restore clips after app reinstall.
+ */
+export async function downloadClipIfMissing(
+  clipId: string,
+  remoteUrl: string,
+  journeyId: string,
+  captureType: "video" | "photo"
+): Promise<string | null> {
+  // Check if we already have it locally
+  const existing = await getClipLocalUri(clipId);
+  if (existing) {
+    const info = await FileSystem.getInfoAsync(existing);
+    if (info.exists) return existing;
+  }
+
+  try {
+    const dir = `${CLIPS_DIR}${journeyId}/`;
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+
+    const ext = captureType === "photo" ? "jpg" : "mp4";
+    const destUri = `${dir}${makeId()}.${ext}`;
+
+    const result = await FileSystem.downloadAsync(remoteUrl, destUri);
+    if (result.status >= 200 && result.status < 300) {
+      await registerClipLocalUri(clipId, destUri);
+      return destUri;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function readMapRaw(): Promise<Record<string, string>> {
   try {
     const raw = await AsyncStorage.getItem(LOCAL_URIS_KEY);

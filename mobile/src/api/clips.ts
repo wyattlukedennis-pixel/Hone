@@ -1,5 +1,5 @@
 import { env } from "../env";
-import { getAllClipLocalUris, clearLocalClipsForJourney } from "../storage/clipFileStore";
+import { getAllClipLocalUris, clearLocalClipsForJourney, downloadClipIfMissing } from "../storage/clipFileStore";
 import { requestJson } from "./http";
 import type { ClipResponse, ClipsResponse, UploadUrlResponse } from "../types/clip";
 
@@ -190,16 +190,22 @@ export async function listClips(token: string, journeyId: string) {
     requestJson<ClipsResponse>(`/journeys/${journeyId}/clips`, { token }),
     getAllClipLocalUris()
   ]);
-  return {
-    ...response,
-    clips: response.clips.map((clip) => {
-      const localUri = localUris[clip.id];
-      if (localUri) {
-        return { ...clip, videoUrl: localUri };
-      }
-      return normalizeClipMediaUrl(clip);
-    })
-  };
+  const clips = response.clips.map((clip) => {
+    const localUri = localUris[clip.id];
+    if (localUri) {
+      return { ...clip, videoUrl: localUri };
+    }
+    return normalizeClipMediaUrl(clip);
+  });
+
+  // Background-download clips that exist in cloud but not locally (e.g. after reinstall)
+  for (const clip of clips) {
+    if (!localUris[clip.id] && clip.videoUrl !== "local://device" && clip.videoUrl.startsWith("http")) {
+      downloadClipIfMissing(clip.id, clip.videoUrl, clip.journeyId, clip.captureType).catch(() => {});
+    }
+  }
+
+  return { ...response, clips };
 }
 
 export async function clearJourneyClips(token: string, journeyId: string) {
