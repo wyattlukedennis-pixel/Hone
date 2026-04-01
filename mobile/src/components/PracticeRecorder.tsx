@@ -64,7 +64,7 @@ export function PracticeRecorder({
   const [ticker, setTicker] = useState(0);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [cameraMounted, setCameraMounted] = useState(false);
-  const [ghostEnabled, setGhostEnabled] = useState(true);
+  const [ghostEnabled, setGhostEnabled] = useState(false);
   const [ghostImageUri, setGhostImageUri] = useState<string | null>(null);
   const transition = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
@@ -78,7 +78,7 @@ export function PracticeRecorder({
       setRecordingStartedAtMs(null);
       setSaveErrorMessage(null);
       setCameraMounted(false);
-      setGhostEnabled(true);
+      setGhostEnabled(false);
       setGhostImageUri(null);
       return;
     }
