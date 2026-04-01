@@ -482,6 +482,7 @@ export type TimelapseRenderInput = {
   journeyId: string;
   clips: Clip[];
   holdMs: number;
+  holdFirstLastMs?: number;
 };
 
 export type TimelapseRenderResult = {
@@ -500,12 +501,16 @@ export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise
   if (!photoClips.length) throw new Error("TIMELAPSE_NO_PHOTOS");
 
   const holdSeconds = Math.max(0.05, input.holdMs / 1000);
+  const holdFirstLastSeconds = input.holdFirstLastMs
+    ? Math.max(0.05, input.holdFirstLastMs / 1000)
+    : holdSeconds;
 
   // Cache key
   const keyData = [
-    "timelapse-v2",
+    "timelapse-v3",
     input.journeyId,
     String(input.holdMs),
+    String(input.holdFirstLastMs ?? "none"),
     ...photoClips.map((c) => c.id),
   ].join("|");
   const hash = createHash("sha256").update(keyData).digest("hex").slice(0, 16);
@@ -540,15 +545,17 @@ export async function renderPhotoTimelapse(input: TimelapseRenderInput): Promise
 
     if (!photoPaths.length) throw new Error("TIMELAPSE_NO_VALID_PHOTOS");
 
-    // Build concat list
+    // Build concat list — hold first/last frames longer for dramatic effect
     const concatLines: string[] = [];
-    for (const p of photoPaths) {
-      concatLines.push(`file '${p}'`);
-      concatLines.push(`duration ${holdSeconds}`);
+    for (let i = 0; i < photoPaths.length; i++) {
+      const isFirstOrLast = i === 0 || i === photoPaths.length - 1;
+      const dur = isFirstOrLast ? holdFirstLastSeconds : holdSeconds;
+      concatLines.push(`file '${photoPaths[i]}'`);
+      concatLines.push(`duration ${dur}`);
     }
     // Repeat last entry so ffmpeg doesn't cut it short
     concatLines.push(`file '${photoPaths[photoPaths.length - 1]}'`);
-    concatLines.push(`duration ${holdSeconds}`);
+    concatLines.push(`duration ${holdFirstLastSeconds}`);
 
     const concatFile = path.join(tempDir, "list.txt");
     await writeFile(concatFile, concatLines.join("\n"), "utf-8");

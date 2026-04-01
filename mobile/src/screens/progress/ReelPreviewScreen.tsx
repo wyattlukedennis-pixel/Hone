@@ -471,7 +471,7 @@ export default function ReelPreviewScreen({
     if (!token || !journeyId) return null;
     setExporting(true);
     try {
-      const uri = await renderTimelapseVideo(token, journeyId, SPEED_MAP[speedPreset], timelapseClips);
+      const uri = await renderTimelapseVideo(token, journeyId, SPEED_MAP[speedPreset], 2000, timelapseClips);
       return uri;
     } finally {
       setExporting(false);

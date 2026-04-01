@@ -341,7 +341,7 @@ export function registerProgressRoutes(app: FastifyInstance) {
   // -----------------------------------------------------------------------
   app.post<{
     Params: { journeyId: string };
-    Body: { holdMs?: number };
+    Body: { holdMs?: number; holdFirstLastMs?: number };
   }>("/journeys/:journeyId/timelapse/render", async (request, reply) => {
     const auth = await requireAuth(request, reply);
     if (!auth) return;
@@ -354,6 +354,7 @@ export function registerProgressRoutes(app: FastifyInstance) {
     if (!journey) return reply.code(404).send({ error: "JOURNEY_NOT_FOUND" });
 
     const holdMs = Number(request.body?.holdMs) || 500;
+    const holdFirstLastMs = Number(request.body?.holdFirstLastMs) || undefined;
     const clips = await listClipsForJourney(pool, request.params.journeyId);
     const photoClips = clips.filter((c) => c.captureType === "photo");
 
@@ -365,6 +366,7 @@ export function registerProgressRoutes(app: FastifyInstance) {
       journeyId: request.params.journeyId,
       clips: photoClips,
       holdMs,
+      holdFirstLastMs,
     });
 
     return reply.send({

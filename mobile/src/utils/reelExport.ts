@@ -563,7 +563,8 @@ export async function resolveReelUri(input: ExportReelInput): Promise<string | n
 export async function renderTimelapseVideo(
   token: string,
   journeyId: string,
-  holdMs: number,
+  frameMs: number,
+  holdFirstLastMs: number,
   clips?: Clip[],
 ): Promise<string | null> {
   try {
@@ -588,7 +589,7 @@ export async function renderTimelapseVideo(
 
     const response = await requestJson<{ url: string; photoCount: number }>(
       `/journeys/${journeyId}/timelapse/render`,
-      { method: "POST", token, body: { holdMs } },
+      { method: "POST", token, body: { holdMs: frameMs, holdFirstLastMs } },
     );
 
     if (!response.url) return null;
