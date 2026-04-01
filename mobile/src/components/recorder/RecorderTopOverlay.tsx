@@ -28,7 +28,7 @@ export function RecorderTopOverlay({
   recording,
   saving,
   captureType: _captureType,
-  skillPack,
+  skillPack: _skillPack,
   journeyTitle,
   dayNumber,
   cameraMounted,
