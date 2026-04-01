@@ -2,7 +2,6 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { TactilePressable } from "../TactilePressable";
 import type { SkillPack } from "../../types/journey";
-import { getSkillPackLabel } from "../../utils/skillPack";
 
 type RecorderTopOverlayProps = {
   paddingTop: number;
@@ -52,7 +51,7 @@ export function RecorderTopOverlay({
       </View>
       <View style={styles.topCopy}>
         <Text style={styles.kicker}>
-          {(journeyTitle ?? "practice session").toLowerCase()} · {getSkillPackLabel(skillPack).toLowerCase()}
+          {(journeyTitle ?? "practice session").toLowerCase()}
         </Text>
         <View style={styles.titleRow}>
           <Text style={styles.title}>day {dayNumber ?? 1}</Text>

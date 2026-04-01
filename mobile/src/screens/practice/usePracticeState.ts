@@ -258,7 +258,7 @@ export function usePracticeState({
     }
   }
 
-  async function loadJourneys({ silent = false, skipActiveSwitch = false }: { silent?: boolean; skipActiveSwitch?: boolean } = {}) {
+  async function loadJourneys({ silent = false, skipActiveSwitch = false }: { silent?: boolean; skipActiveSwitch?: boolean } = {}): Promise<Journey[]> {
     if (silent) {
       setRefreshing(true);
     } else {
@@ -281,8 +281,10 @@ export function usePracticeState({
           }
         }
       }
+      return response.journeys;
     } catch (error) {
       setErrorMessage(toJourneyErrorMessage(error));
+      return [];
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -336,13 +338,14 @@ export function usePracticeState({
   }, []);
 
   useEffect(() => {
-    setClipsByJourney({});
-    setClipsLoadingByJourney({});
-    void loadJourneys({ silent: true, skipActiveSwitch: true });
-    if (activeJourneyId) {
-      void loadJourneyClips(activeJourneyId);
-    }
-    void refreshPendingUploadCount();
+    void (async () => {
+      const freshJourneys = await loadJourneys({ silent: true, skipActiveSwitch: true });
+      // Reload clips for all journeys (not just active) to keep stats accurate
+      for (const journey of freshJourneys) {
+        void loadJourneyClips(journey.id);
+      }
+      void refreshPendingUploadCount();
+    })();
   }, [recordingsRevision]);
 
   useEffect(() => {
