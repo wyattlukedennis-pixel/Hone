@@ -232,9 +232,9 @@ export function PracticeRecorder({
                   )
                 ) : null}
                 {referenceClipUrl && ghostEnabled && !captured ? (
-                  <View style={styles.ghostOverlay} pointerEvents="none">
+                  <View style={[styles.ghostOverlay, facing === "front" && { transform: [{ scaleX: -1 }] }]} pointerEvents="none">
                     <Image source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                    <Text style={styles.ghostLabel}>yesterday</Text>
+                    <Text style={[styles.ghostLabel, facing === "front" && { transform: [{ scaleX: -1 }] }]}>yesterday</Text>
                   </View>
                 ) : null}
                 {!cameraMounted ? (
