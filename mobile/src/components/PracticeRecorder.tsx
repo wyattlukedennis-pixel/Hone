@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { trackEvent } from "../analytics/events";
 import { theme } from "../theme";
 import { useReducedMotion } from "../utils/useReducedMotion";
@@ -63,7 +64,8 @@ export function PracticeRecorder({
   const [ticker, setTicker] = useState(0);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [cameraMounted, setCameraMounted] = useState(false);
-  const [ghostEnabled, setGhostEnabled] = useState(captureType === "photo");
+  const [ghostEnabled, setGhostEnabled] = useState(true);
+  const [ghostImageUri, setGhostImageUri] = useState<string | null>(null);
   const transition = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
   const duration = (ms: number) => (reducedMotion ? 0 : ms);
@@ -76,7 +78,8 @@ export function PracticeRecorder({
       setRecordingStartedAtMs(null);
       setSaveErrorMessage(null);
       setCameraMounted(false);
-      setGhostEnabled(captureType === "photo");
+      setGhostEnabled(true);
+      setGhostImageUri(null);
       return;
     }
     // Stage the opening: animate sheet first, then mount camera to avoid dropped frames.
@@ -93,6 +96,33 @@ export function PracticeRecorder({
 
     return () => clearTimeout(mountTimer);
   }, [visible, transition, reducedMotion]);
+
+  // Generate ghost image: use reference clip directly for photos, extract mid-frame for videos
+  useEffect(() => {
+    if (!referenceClipUrl) {
+      setGhostImageUri(null);
+      return;
+    }
+    const lower = referenceClipUrl.toLowerCase();
+    const isVideo = lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".m4v") || lower.includes("video");
+    if (!isVideo) {
+      // Photo — use directly
+      setGhostImageUri(referenceClipUrl);
+      return;
+    }
+    // Video — grab middle frame
+    let cancelled = false;
+    (async () => {
+      try {
+        const { uri } = await VideoThumbnails.getThumbnailAsync(referenceClipUrl, { time: 2500 });
+        if (!cancelled) setGhostImageUri(uri);
+      } catch {
+        // If thumbnail fails, still try the URL directly (some formats work as images)
+        if (!cancelled) setGhostImageUri(referenceClipUrl);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [referenceClipUrl]);
 
   useEffect(() => {
     if (!recordingStartedAtMs) return;
@@ -231,9 +261,9 @@ export function PracticeRecorder({
                     <Image source={{ uri: captured.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                   )
                 ) : null}
-                {referenceClipUrl && ghostEnabled && !captured ? (
+                {ghostImageUri && ghostEnabled && !captured ? (
                   <View style={[styles.ghostOverlay, facing === "front" && { transform: [{ scaleX: -1 }] }]} pointerEvents="none">
-                    <Image source={{ uri: referenceClipUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    <Image source={{ uri: ghostImageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                     <Text style={[styles.ghostLabel, facing === "front" && { transform: [{ scaleX: -1 }] }]}>yesterday</Text>
                   </View>
                 ) : null}
@@ -244,7 +274,7 @@ export function PracticeRecorder({
                   </View>
                 ) : null}
                 <LinearGradient colors={["rgba(0,0,0,0.15)", "transparent", "rgba(0,0,0,0.2)"]} style={StyleSheet.absoluteFill} pointerEvents="none" />
-                {referenceClipUrl && !captured && !recording ? (
+                {ghostImageUri && !captured && !recording ? (
                   <Pressable
                     style={[styles.ghostToggle, ghostEnabled ? styles.ghostToggleActive : null]}
                     onPress={() => setGhostEnabled((v) => !v)}
