@@ -80,6 +80,7 @@ export function ProgressScreen({
   const insets = useSafeAreaInsets();
   const duration = (ms: number) => (reducedMotion ? 0 : ms);
   const [comparisonSourceRect, setComparisonSourceRect] = useState<RevealSourceRect | null>(null);
+  const [compareEntryStage, setCompareEntryStage] = useState<"compare" | "reel">("compare");
   const [advancingMilestoneLength, setAdvancingMilestoneLength] = useState<number | null>(null);
   const [chapterActionMessage, setChapterActionMessage] = useState<string | null>(null);
   const [chapterRevealOpen, setChapterRevealOpen] = useState(false);
@@ -670,6 +671,7 @@ export function ProgressScreen({
   function openMirrorComparison(sourceRect: RevealSourceRect | null) {
     if (!selectedJourney || !comparison) return;
     setComparisonSourceRect(sourceRect);
+    setCompareEntryStage("compare");
     setCompareModalOpen(true);
     trackEvent("comparison_reveal_opened", {
       journeyId: selectedJourney.id,
@@ -710,8 +712,9 @@ export function ProgressScreen({
         source: "practice_deep_link"
       });
     } else {
-      setComparisonSourceRect(null);
-      setCompareModalOpen(true);
+      setReelMode("video");
+      setComposedDaySpan(chapterProgressDays);
+      setReelPreviewVisible(true);
       trackEvent("comparison_reveal_opened", {
         journeyId: selectedJourney.id,
         source: "practice_compare_deep_link"
@@ -1088,7 +1091,9 @@ export function ProgressScreen({
                                 return;
                               }
                             }
-                            openMirrorComparison(null);
+                            setReelMode("video");
+                            setComposedDaySpan(chapterProgressDays);
+                            setReelPreviewVisible(true);
                             return;
                           }
                           trackEvent("record_tapped", { journeyId: selectedJourney.id, context: "progress_build_capsule" });
@@ -1236,7 +1241,7 @@ export function ProgressScreen({
         visible={compareModalOpen && Boolean(activeComparison)}
         comparison={activeComparison}
         presetLabel={activePresetLabel}
-        entryStage="reel"
+        entryStage={compareEntryStage}
         token={token}
         chapterNumber={chapterNumber}
         journeyId={selectedJourney?.id ?? null}
