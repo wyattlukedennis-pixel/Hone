@@ -119,6 +119,7 @@ export function ProgressScreen({
   const [timelapsePhotos, setTimelapsePhotos] = useState<Array<{ uri: string; label: string }>>([]);
   const [timelapseClipObjects, setTimelapseClipObjects] = useState<Clip[]>([]);
   const [composedDaySpan, setComposedDaySpan] = useState(0);
+  const [skipReelLoading, setSkipReelLoading] = useState(false);
 
   // Notify parent when fullscreen overlay is active (hides tab bar)
   useEffect(() => {
@@ -683,6 +684,7 @@ export function ProgressScreen({
             setTimelapseClipObjects(clips.map(c => c.clip));
             setReelMode("timelapse");
             setComposedDaySpan(clips.length);
+            setSkipReelLoading(false);
             setReelPreviewVisible(true);
             trackEvent("milestone_reveal_opened", {
               journeyId: selectedJourney.id,
@@ -703,6 +705,7 @@ export function ProgressScreen({
     } else {
       setReelMode("video");
       setComposedDaySpan(chapterProgressDays);
+      setSkipReelLoading(true);
       setReelPreviewVisible(true);
       trackEvent("comparison_reveal_opened", {
         journeyId: selectedJourney.id,
@@ -797,6 +800,7 @@ export function ProgressScreen({
           setTimelapseClipObjects(clips.map(c => c.clip));
           setReelMode("timelapse");
           setComposedDaySpan(clips.length);
+          setSkipReelLoading(false);
           setReelPreviewVisible(true);
         }
       })();
@@ -1032,6 +1036,7 @@ export function ProgressScreen({
                                 setTimelapseClipObjects(clips.map(c => c.clip));
                                 setReelMode("timelapse");
                                 setComposedDaySpan(clips.length);
+                                setSkipReelLoading(false);
                                 setReelPreviewVisible(true);
                                 trackEvent("chapter_reveal_opened", { journeyId: selectedJourney.id, chapterNumber, mode: "timelapse" });
                                 return;
@@ -1069,19 +1074,9 @@ export function ProgressScreen({
                         style={[styles.revealCapsulePrimary]}
                         onPress={async () => {
                           if (compareReady) {
-                            if (selectedJourney.captureMode === "photo") {
-                              const clips = await buildTimelapseClips(token, selectedJourney.id);
-                              if (clips.length > 0) {
-                                setTimelapsePhotos(clips.map(c => ({ uri: c.clip.videoUrl, label: c.label })));
-                                setTimelapseClipObjects(clips.map(c => c.clip));
-                                setReelMode("timelapse");
-                                setComposedDaySpan(clips.length);
-                                setReelPreviewVisible(true);
-                                return;
-                              }
-                            }
                             setReelMode("video");
                             setComposedDaySpan(chapterProgressDays);
+                            setSkipReelLoading(true);
                             setReelPreviewVisible(true);
                             return;
                           }
@@ -1387,6 +1382,7 @@ export function ProgressScreen({
         timelapseClips={reelMode === "timelapse" ? timelapseClipObjects : undefined}
         token={token}
         journeyId={selectedJourney?.id}
+        skipLoading={skipReelLoading}
       />
       <ChapterRevealScreen
         visible={chapterRevealOpen}

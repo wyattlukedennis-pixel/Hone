@@ -42,6 +42,8 @@ type ReelPreviewScreenProps = {
   // For timelapse export
   token?: string;
   journeyId?: string;
+  /** Skip the "building your reveal..." loading animation */
+  skipLoading?: boolean;
 };
 
 const ACCENT = "#E8450A";
@@ -93,6 +95,7 @@ export default function ReelPreviewScreen({
   timelapseClips,
   token,
   journeyId,
+  skipLoading = false,
 }: ReelPreviewScreenProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -159,7 +162,6 @@ export default function ReelPreviewScreen({
     if (!visible) return;
 
     // Reset all state
-    setPhase(goalText ? "intention" : "loading");
     setShowingNow(false);
     setTimelapseIndex(0);
     setTimelapseReady(false);
@@ -168,6 +170,19 @@ export default function ReelPreviewScreen({
     revealSoundPlayed.current = false;
     firstVideoLoaded.current = false;
     latestVideoLoaded.current = false;
+
+    // Skip loading animation — go straight to playing
+    if (skipLoading) {
+      setPhase("playing");
+      fadeAnim.setValue(1);
+      contentAnim.setValue(1);
+      videoEntryScale.setValue(1);
+      videoEntryOpacity.setValue(1);
+      loadingExitOpacity.setValue(0);
+      return;
+    }
+
+    setPhase(goalText ? "intention" : "loading");
 
     // Reset all animation values
     fadeAnim.setValue(0);
