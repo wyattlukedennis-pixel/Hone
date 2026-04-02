@@ -80,7 +80,6 @@ export function ProgressScreen({
   const insets = useSafeAreaInsets();
   const duration = (ms: number) => (reducedMotion ? 0 : ms);
   const [comparisonSourceRect, setComparisonSourceRect] = useState<RevealSourceRect | null>(null);
-  const [compareEntryStage, setCompareEntryStage] = useState<"compare" | "reel">("compare");
   const [advancingMilestoneLength, setAdvancingMilestoneLength] = useState<number | null>(null);
   const [chapterActionMessage, setChapterActionMessage] = useState<string | null>(null);
   const [chapterRevealOpen, setChapterRevealOpen] = useState(false);
@@ -668,16 +667,6 @@ export function ProgressScreen({
     }).start();
   }, [compareModalOpen, reducedMotion, progressTakeover]);
 
-  function openMirrorComparison(sourceRect: RevealSourceRect | null) {
-    if (!selectedJourney || !comparison) return;
-    setComparisonSourceRect(sourceRect);
-    setCompareEntryStage("compare");
-    setCompareModalOpen(true);
-    trackEvent("comparison_reveal_opened", {
-      journeyId: selectedJourney.id,
-      source: revealReady ? "progress_reveal_cta" : "progress_compare_cta"
-    });
-  }
 
 
   useEffect(() => {
@@ -1241,7 +1230,7 @@ export function ProgressScreen({
         visible={compareModalOpen && Boolean(activeComparison)}
         comparison={activeComparison}
         presetLabel={activePresetLabel}
-        entryStage={compareEntryStage}
+        entryStage="compare"
         token={token}
         chapterNumber={chapterNumber}
         journeyId={selectedJourney?.id ?? null}
