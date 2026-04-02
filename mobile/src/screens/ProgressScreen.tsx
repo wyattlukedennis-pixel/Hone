@@ -1383,6 +1383,7 @@ export function ProgressScreen({
         token={token}
         journeyId={selectedJourney?.id}
         skipLoading={skipReelLoading}
+        captureMode={selectedJourney?.captureMode ?? "video"}
       />
       <ChapterRevealScreen
         visible={chapterRevealOpen}

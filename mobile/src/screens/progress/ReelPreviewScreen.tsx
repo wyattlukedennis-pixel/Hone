@@ -44,6 +44,8 @@ type ReelPreviewScreenProps = {
   journeyId?: string;
   /** Skip the "building your reveal..." loading animation */
   skipLoading?: boolean;
+  /** Capture mode for the clips — determines Image vs Video rendering */
+  captureMode?: "video" | "photo";
 };
 
 const ACCENT = "#E8450A";
@@ -96,6 +98,7 @@ export default function ReelPreviewScreen({
   token,
   journeyId,
   skipLoading = false,
+  captureMode = "video",
 }: ReelPreviewScreenProps) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -618,7 +621,7 @@ export default function ReelPreviewScreen({
               styles.chapterLabel,
               { color: textSecondary, opacity: videoEntryOpacity },
             ]}>
-              {chapterNumber ? `chapter ${chapterNumber} reveal` : "your reveal"}
+              {skipLoading ? "day 1 vs now" : chapterNumber ? `chapter ${chapterNumber} reveal` : "your reveal"}
             </Animated.Text>
           )}
 
@@ -653,30 +656,46 @@ export default function ReelPreviewScreen({
               <>
                 {firstClipUri ? (
                   <View style={[StyleSheet.absoluteFill, showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "none" : "auto"}>
-                    <Video
-                      source={{ uri: firstClipUri }}
-                      style={StyleSheet.absoluteFill}
-                      resizeMode={ResizeMode.COVER}
-                      isLooping
-                      isMuted={!purchaseUnlocked}
-                      shouldPlay={visible && phase === "playing" && !showingNow}
-                      onPlaybackStatusUpdate={handleFirstPlaybackStatus}
-                      onError={() => {}}
-                    />
+                    {captureMode === "photo" ? (
+                      <Image
+                        source={{ uri: firstClipUri }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Video
+                        source={{ uri: firstClipUri }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode={ResizeMode.COVER}
+                        isLooping
+                        isMuted={!purchaseUnlocked}
+                        shouldPlay={visible && phase === "playing" && !showingNow}
+                        onPlaybackStatusUpdate={handleFirstPlaybackStatus}
+                        onError={() => {}}
+                      />
+                    )}
                   </View>
                 ) : null}
                 {latestClipUri ? (
                   <View style={[StyleSheet.absoluteFill, !showingNow && { opacity: 0 }]} pointerEvents={showingNow ? "auto" : "none"}>
-                    <Video
-                      source={{ uri: latestClipUri }}
-                      style={StyleSheet.absoluteFill}
-                      resizeMode={ResizeMode.COVER}
-                      isLooping
-                      isMuted={!purchaseUnlocked}
-                      shouldPlay={visible && phase === "playing" && showingNow}
-                      onPlaybackStatusUpdate={handleLatestPlaybackStatus}
-                      onError={() => {}}
-                    />
+                    {captureMode === "photo" ? (
+                      <Image
+                        source={{ uri: latestClipUri }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Video
+                        source={{ uri: latestClipUri }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode={ResizeMode.COVER}
+                        isLooping
+                        isMuted={!purchaseUnlocked}
+                        shouldPlay={visible && phase === "playing" && showingNow}
+                        onPlaybackStatusUpdate={handleLatestPlaybackStatus}
+                        onError={() => {}}
+                      />
+                    )}
                   </View>
                 ) : null}
               </>
