@@ -391,6 +391,9 @@ export function buildChapterComparisonPlan(clips: Clip[], config: MilestoneChapt
   if (chapterClips.length < 2) return null;
 
   const nowClip = chapterClips[chapterClips.length - 1];
+  // Always use the very first clip of the entire journey as the "then" clip,
+  // so "day 1 vs now" compares against the true beginning across all chapters.
+  const journeyFirstClip = clipsAscending[0];
   const candidateEndIndex = Math.max(1, Math.floor((chapterClips.length - 1) * 0.55));
   const anchorCandidates = chapterClips.slice(0, candidateEndIndex + 1).filter((clip) => clip.id !== nowClip.id);
   if (!anchorCandidates.length) return null;
@@ -414,7 +417,8 @@ export function buildChapterComparisonPlan(clips: Clip[], config: MilestoneChapt
     }
   }
 
-  const thenClip = anchorCandidates[bestIndex];
+  // Use journey day 1 clip for the compare, fall back to best chapter anchor
+  const thenClip = (journeyFirstClip && journeyFirstClip.id !== nowClip.id) ? journeyFirstClip : anchorCandidates[bestIndex];
   if (!thenClip || thenClip.id === nowClip.id) return null;
 
   const consistencyScore = Math.max(0, Math.min(100, Math.round((bestDiagnostics.durationScore * 0.62 + bestDiagnostics.timeWindowScore * 0.38) * 100)));
