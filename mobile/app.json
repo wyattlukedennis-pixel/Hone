@@ -12,7 +12,7 @@
       "backgroundColor": "#f4efe6"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.wyattdennis.hone",
       "icon": "./src/assets/logo.png",
       "usesAppleSignIn": true,

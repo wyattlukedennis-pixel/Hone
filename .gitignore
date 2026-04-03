@@ -21,3 +21,8 @@ uploads/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.backup
+
+# Credentials
+credentials.json
+*.mobileprovision
+*.p12

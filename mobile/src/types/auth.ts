@@ -1,4 +1,4 @@
-export type AuthMode = "login" | "signup";
+export type AuthMode = "login" | "signup" | "forgot" | "reset-code" | "reset-password";
 
 export type User = {
   id: string;

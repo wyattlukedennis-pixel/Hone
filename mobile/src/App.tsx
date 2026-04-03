@@ -788,6 +788,14 @@ export default function App() {
                   onModeChange={setAuthMode}
                   onSubmit={handleAuthSubmit}
                   onAppleAuth={handleAppleAuth}
+                  onResetSuccess={async (result) => {
+                    await saveAuthToken(result.token);
+                    setSession({ token: result.token, user: result.user });
+                    void identifyUser(result.user.id);
+                    trackEvent("password_reset_success", { userId: result.user.id });
+                    setAuthMode("login");
+                    setTab("journeys");
+                  }}
                 />
               ) : (
                 <OnboardingFlow

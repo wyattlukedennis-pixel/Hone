@@ -1,19 +1,26 @@
+import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
 import { config } from "../config.js";
 import { getPool } from "../db/pool.js";
+import { sendPasswordResetEmail } from "../email/resend.js";
 import { ensureDatabase, requireAuth } from "./guard.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import {
   type AuthUser,
+  createPasswordResetToken,
   createSession,
   createUser,
   deleteUser,
   findUserByAppleId,
   findUserByEmail,
+  findValidResetToken,
+  invalidateResetTokensForUser,
   linkAppleId,
+  markResetTokenUsed,
   revokeSession,
-  toPublicUser
+  toPublicUser,
+  updatePasswordHash
 } from "./repository.js";
 import { signAuthToken } from "./token.js";
 
@@ -34,6 +41,24 @@ type AppleAuthBody = {
   displayName?: string;
   identityToken?: string;
 };
+
+type ForgotPasswordBody = {
+  email?: string;
+};
+
+type ResetPasswordBody = {
+  email?: string;
+  code?: string;
+  newPassword?: string;
+};
+
+function generateResetCode(): string {
+  return crypto.randomInt(100000, 999999).toString();
+}
+
+function hashResetCode(code: string): string {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -279,5 +304,93 @@ export function registerAuthRoutes(app: FastifyInstance) {
     await deleteUser(pool, auth.user.id);
 
     return reply.send({ success: true });
+  });
+
+  // --- Password Reset ---
+
+  app.post<{ Body: ForgotPasswordBody }>("/auth/forgot-password", { ...authRateLimit }, async (request, reply) => {
+    if (!ensureDatabase(reply)) return;
+
+    const email = typeof request.body?.email === "string" ? normalizeEmail(request.body.email) : "";
+    if (!EMAIL_REGEX.test(email)) {
+      // Always return success to prevent email enumeration
+      return reply.send({ success: true });
+    }
+
+    const pool = getPool();
+    const user = await findUserByEmail(pool, email);
+    if (!user) {
+      // Don't reveal whether the email exists
+      return reply.send({ success: true });
+    }
+
+    // Invalidate any previous unused tokens
+    await invalidateResetTokensForUser(pool, user.id);
+
+    const code = generateResetCode();
+    const tokenHash = hashResetCode(code);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    await createPasswordResetToken(pool, {
+      userId: user.id,
+      tokenHash,
+      expiresAt
+    });
+
+    await sendPasswordResetEmail(email, code);
+
+    return reply.send({ success: true });
+  });
+
+  app.post<{ Body: ResetPasswordBody }>("/auth/reset-password", { ...authRateLimit }, async (request, reply) => {
+    if (!ensureDatabase(reply)) return;
+
+    const email = typeof request.body?.email === "string" ? normalizeEmail(request.body.email) : "";
+    const code = typeof request.body?.code === "string" ? request.body.code.trim() : "";
+    const newPassword = typeof request.body?.newPassword === "string" ? request.body.newPassword : "";
+
+    if (!EMAIL_REGEX.test(email) || !code || code.length !== 6) {
+      return reply.code(400).send({ error: "INVALID_RESET_CODE" });
+    }
+    if (newPassword.length < 8) {
+      return reply.code(400).send({ error: "PASSWORD_TOO_SHORT" });
+    }
+    if (newPassword.length > 1000) {
+      return reply.code(400).send({ error: "PASSWORD_TOO_LONG" });
+    }
+
+    const pool = getPool();
+    const user = await findUserByEmail(pool, email);
+    if (!user) {
+      return reply.code(400).send({ error: "INVALID_RESET_CODE" });
+    }
+
+    const tokenHash = hashResetCode(code);
+    const token = await findValidResetToken(pool, user.id, tokenHash);
+    if (!token) {
+      return reply.code(400).send({ error: "INVALID_RESET_CODE" });
+    }
+
+    // Mark token as used
+    await markResetTokenUsed(pool, token.id);
+
+    // Update password
+    const passwordHash = await hashPassword(newPassword);
+    await updatePasswordHash(pool, user.id, passwordHash);
+
+    // Create a new session so user is logged in
+    const expiresAt = new Date(Date.now() + config.auth.tokenTtlDays * 24 * 60 * 60 * 1000);
+    const session = await createSession(pool, { userId: user.id, expiresAt });
+    const authToken = signAuthToken({
+      userId: user.id,
+      sessionId: session.id,
+      email: user.email
+    });
+
+    return reply.send({
+      token: authToken,
+      expiresAt: session.expiresAt.toISOString(),
+      user: toPublicUser(user)
+    });
   });
 }

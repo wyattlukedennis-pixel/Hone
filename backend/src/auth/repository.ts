@@ -168,3 +168,45 @@ export async function revokeSession(pool: Pool, sessionId: string) {
     [sessionId]
   );
 }
+
+export async function updatePasswordHash(pool: Pool, userId: string, passwordHash: string) {
+  await pool.query(
+    `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+    [passwordHash, userId]
+  );
+}
+
+export async function createPasswordResetToken(pool: Pool, params: { userId: string; tokenHash: string; expiresAt: Date }) {
+  await pool.query(
+    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+    [params.userId, params.tokenHash, params.expiresAt.toISOString()]
+  );
+}
+
+export async function findValidResetToken(pool: Pool, userId: string, tokenHash: string) {
+  const result = await pool.query<{ id: string; user_id: string; expires_at: Date }>(
+    `
+      SELECT id, user_id, expires_at
+      FROM password_reset_tokens
+      WHERE user_id = $1 AND token_hash = $2 AND used_at IS NULL AND expires_at > NOW()
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [userId, tokenHash]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function markResetTokenUsed(pool: Pool, tokenId: string) {
+  await pool.query(
+    `UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1`,
+    [tokenId]
+  );
+}
+
+export async function invalidateResetTokensForUser(pool: Pool, userId: string) {
+  await pool.query(
+    `UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
+    [userId]
+  );
+}

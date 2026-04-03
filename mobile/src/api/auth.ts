@@ -41,3 +41,17 @@ export function deleteAccount(token: string) {
     token
   });
 }
+
+export function forgotPassword(email: string) {
+  return requestJson<{ success: boolean }>("/auth/forgot-password", {
+    method: "POST",
+    body: { email }
+  });
+}
+
+export function resetPassword(payload: { email: string; code: string; newPassword: string }) {
+  return requestJson<AuthResponse>("/auth/reset-password", {
+    method: "POST",
+    body: payload
+  });
+}

@@ -41,6 +41,10 @@ export const config = {
     processedBucket: env.MEDIA_PROCESSED_BUCKET ?? "",
     cdnBaseUrl: env.MEDIA_CDN_BASE_URL ?? ""
   },
+  email: {
+    resendApiKey: env.RESEND_API_KEY ?? "",
+    fromAddress: env.EMAIL_FROM ?? "Hone <onboarding@resend.dev>"
+  },
   cors: {
     origin: env.CORS_ORIGIN ?? "*"
   }

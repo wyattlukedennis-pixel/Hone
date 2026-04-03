@@ -3,6 +3,7 @@ import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput,
 import { LinearGradient } from "expo-linear-gradient";
 import * as AppleAuthentication from "expo-apple-authentication";
 
+import { forgotPassword, resetPassword } from "../api/auth";
 import { GlassSurface } from "../components/GlassSurface";
 import { theme } from "../theme";
 import type { AuthMode } from "../types/auth";
@@ -28,12 +29,19 @@ type AuthScreenProps = {
   onModeChange: (mode: AuthMode) => void;
   onSubmit: (values: AuthFormValues) => Promise<void>;
   onAppleAuth: (result: AppleAuthResult) => Promise<void>;
+  onResetSuccess?: (result: { token: string; expiresAt: string; user: { id: string; email: string; displayName: string | null } }) => void;
 };
 
-export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit, onAppleAuth }: AuthScreenProps) {
+export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit, onAppleAuth, onResetSuccess }: AuthScreenProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
   const entrance = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -45,6 +53,10 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
   }, [entrance]);
 
   const isSignup = mode === "signup";
+  const isForgot = mode === "forgot";
+  const isResetCode = mode === "reset-code";
+  const isResetPassword = mode === "reset-password";
+  const isResetFlow = isForgot || isResetCode || isResetPassword;
 
   async function handleSubmit() {
     triggerSelectionHaptic();
@@ -53,6 +65,69 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
       password,
       displayName
     });
+  }
+
+  async function handleForgotSubmit() {
+    triggerSelectionHaptic();
+    setResetError(null);
+    setResetLoading(true);
+    try {
+      await forgotPassword(resetEmail);
+      setResetSuccess("check your email for a 6-digit code");
+      onModeChange("reset-code");
+    } catch {
+      setResetError("something went wrong. try again.");
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  async function handleResetCodeSubmit() {
+    triggerSelectionHaptic();
+    setResetError(null);
+    if (resetCode.length !== 6) {
+      setResetError("enter the 6-digit code from your email");
+      return;
+    }
+    onModeChange("reset-password");
+  }
+
+  async function handleResetPasswordSubmit() {
+    triggerSelectionHaptic();
+    setResetError(null);
+    if (newPassword.length < 8) {
+      setResetError("password must be at least 8 characters");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const result = await resetPassword({
+        email: resetEmail,
+        code: resetCode,
+        newPassword
+      });
+      onResetSuccess?.(result);
+    } catch {
+      setResetError("invalid or expired code. try again.");
+      onModeChange("reset-code");
+      setResetCode("");
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  function getHeroTitle() {
+    if (isForgot) return "forgot password";
+    if (isResetCode) return "check your email";
+    if (isResetPassword) return "new password";
+    return isSignup ? "start account" : "welcome back";
+  }
+
+  function getHeroSubtitle() {
+    if (isForgot) return "we'll send you a reset code";
+    if (isResetCode) return "enter the 6-digit code we sent";
+    if (isResetPassword) return "choose a new password";
+    return isSignup ? "one take a day. that's it." : "pick up where you left off";
   }
 
   return (
@@ -78,124 +153,284 @@ export function AuthScreen({ mode, loading, errorMessage, onModeChange, onSubmit
         <View style={styles.brandPill}>
           <Text style={styles.brandPillText}>HONE</Text>
         </View>
-        <Text style={styles.title}>{isSignup ? "start account" : "welcome back"}</Text>
-        <Text style={styles.subtitle}>{isSignup ? "one take a day. that's it." : "pick up where you left off"}</Text>
+        <Text style={styles.title}>{getHeroTitle()}</Text>
+        <Text style={styles.subtitle}>{getHeroSubtitle()}</Text>
       </Animated.View>
 
       <GlassSurface style={styles.formCard} intensity={22}>
-        <View style={styles.modeRow}>
-          <Pressable
-            style={[styles.modeButton, mode === "login" ? styles.modeButtonActive : undefined]}
-            onPress={() => {
-              triggerSelectionHaptic();
-              onModeChange("login");
-            }}
-          >
-            <Text style={[styles.modeText, mode === "login" ? styles.modeTextActive : undefined]}>sign in</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.modeButton, mode === "signup" ? styles.modeButtonActive : undefined]}
-            onPress={() => {
-              triggerSelectionHaptic();
-              onModeChange("signup");
-            }}
-          >
-            <Text style={[styles.modeText, mode === "signup" ? styles.modeTextActive : undefined]}>create</Text>
-          </Pressable>
-        </View>
+        {/* Login / Signup mode tabs — hidden during reset flow */}
+        {!isResetFlow ? (
+          <>
+            <View style={styles.modeRow}>
+              <Pressable
+                style={[styles.modeButton, mode === "login" ? styles.modeButtonActive : undefined]}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  onModeChange("login");
+                }}
+              >
+                <Text style={[styles.modeText, mode === "login" ? styles.modeTextActive : undefined]}>sign in</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modeButton, mode === "signup" ? styles.modeButtonActive : undefined]}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  onModeChange("signup");
+                }}
+              >
+                <Text style={[styles.modeText, mode === "signup" ? styles.modeTextActive : undefined]}>create</Text>
+              </Pressable>
+            </View>
 
-        {isSignup ? (
-          <TextInput
-            style={styles.input}
-            placeholder="name"
-            autoCapitalize="words"
-            value={displayName}
-            onChangeText={setDisplayName}
-            editable={!loading}
-            placeholderTextColor="#b0a090"
-          />
+            {isSignup ? (
+              <TextInput
+                style={styles.input}
+                placeholder="name"
+                autoCapitalize="words"
+                value={displayName}
+                onChangeText={setDisplayName}
+                editable={!loading}
+                placeholderTextColor="#b0a090"
+              />
+            ) : null}
+
+            <Text style={styles.inputLabel}>email address</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="you@domain.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={email}
+              onChangeText={setEmail}
+              editable={!loading}
+              placeholderTextColor="#b0a090"
+            />
+            <Text style={styles.inputLabel}>password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="enter password"
+              secureTextEntry
+              autoCapitalize="none"
+              value={password}
+              onChangeText={setPassword}
+              editable={!loading}
+              placeholderTextColor="#b0a090"
+            />
+
+            {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.submitButton,
+                loading ? styles.submitButtonLoading : undefined,
+                pressed && !loading ? styles.submitButtonPressed : undefined
+              ]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              <LinearGradient
+                colors={loading ? ["#c9a07a", "#b8906a"] : ["#ff8b2b", "#ff5a1f"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.submitGradient}
+              >
+                <Text style={styles.submitText}>{loading ? "working..." : isSignup ? "start account" : "sign in"}</Text>
+              </LinearGradient>
+            </Pressable>
+
+            {/* Forgot password link — only on login */}
+            {mode === "login" ? (
+              <Pressable
+                style={styles.forgotLink}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  setResetEmail(email); // pre-fill if they already typed it
+                  setResetError(null);
+                  setResetSuccess(null);
+                  setResetCode("");
+                  setNewPassword("");
+                  onModeChange("forgot");
+                }}
+              >
+                <Text style={styles.forgotLinkText}>forgot password?</Text>
+              </Pressable>
+            ) : null}
+
+            {Platform.OS === "ios" ? (
+              <>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={16}
+                  style={styles.appleButton}
+                  onPress={async () => {
+                    try {
+                      const credential = await AppleAuthentication.signInAsync({
+                        requestedScopes: [
+                          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                        ],
+                      });
+                      const dn = [credential.fullName?.givenName, credential.fullName?.familyName]
+                        .filter(Boolean)
+                        .join(" ") || null;
+                      await onAppleAuth({
+                        appleUserId: credential.user,
+                        email: credential.email,
+                        displayName: dn,
+                        identityToken: credential.identityToken,
+                      });
+                    } catch (error: unknown) {
+                      const code = (error as { code?: string })?.code;
+                      if (code === "ERR_REQUEST_CANCELED") return;
+                    }
+                  }}
+                />
+              </>
+            ) : null}
+          </>
         ) : null}
 
-        <Text style={styles.inputLabel}>email address</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="you@domain.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          value={email}
-          onChangeText={setEmail}
-          editable={!loading}
-          placeholderTextColor="#b0a090"
-        />
-        <Text style={styles.inputLabel}>password</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="enter password"
-          secureTextEntry
-          autoCapitalize="none"
-          value={password}
-          onChangeText={setPassword}
-          editable={!loading}
-          placeholderTextColor="#b0a090"
-        />
-
-        {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.submitButton,
-            loading ? styles.submitButtonLoading : undefined,
-            pressed && !loading ? styles.submitButtonPressed : undefined
-          ]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          <LinearGradient
-            colors={loading ? ["#c9a07a", "#b8906a"] : ["#ff8b2b", "#ff5a1f"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.submitGradient}
-          >
-            <Text style={styles.submitText}>{loading ? "working..." : isSignup ? "start account" : "sign in"}</Text>
-          </LinearGradient>
-        </Pressable>
-
-        {Platform.OS === "ios" ? (
+        {/* Forgot password — enter email */}
+        {isForgot ? (
           <>
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={16}
-              style={styles.appleButton}
-              onPress={async () => {
-                try {
-                  const credential = await AppleAuthentication.signInAsync({
-                    requestedScopes: [
-                      AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-                      AppleAuthentication.AppleAuthenticationScope.EMAIL,
-                    ],
-                  });
-                  const displayName = [credential.fullName?.givenName, credential.fullName?.familyName]
-                    .filter(Boolean)
-                    .join(" ") || null;
-                  await onAppleAuth({
-                    appleUserId: credential.user,
-                    email: credential.email,
-                    displayName,
-                    identityToken: credential.identityToken,
-                  });
-                } catch (error: unknown) {
-                  const code = (error as { code?: string })?.code;
-                  if (code === "ERR_REQUEST_CANCELED") return;
-                }
-              }}
+            <Text style={styles.inputLabel}>email address</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="you@domain.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={resetEmail}
+              onChangeText={setResetEmail}
+              editable={!resetLoading}
+              placeholderTextColor="#b0a090"
             />
+
+            {resetError ? <Text style={styles.error}>{resetError}</Text> : null}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.submitButton,
+                resetLoading ? styles.submitButtonLoading : undefined,
+                pressed && !resetLoading ? styles.submitButtonPressed : undefined
+              ]}
+              onPress={handleForgotSubmit}
+              disabled={resetLoading}
+            >
+              <LinearGradient
+                colors={resetLoading ? ["#c9a07a", "#b8906a"] : ["#ff8b2b", "#ff5a1f"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.submitGradient}
+              >
+                <Text style={styles.submitText}>{resetLoading ? "sending..." : "send reset code"}</Text>
+              </LinearGradient>
+            </Pressable>
+
+            <Pressable
+              style={styles.forgotLink}
+              onPress={() => {
+                triggerSelectionHaptic();
+                setResetError(null);
+                onModeChange("login");
+              }}
+            >
+              <Text style={styles.forgotLinkText}>back to sign in</Text>
+            </Pressable>
+          </>
+        ) : null}
+
+        {/* Reset code — enter 6-digit code */}
+        {isResetCode ? (
+          <>
+            {resetSuccess ? <Text style={styles.successText}>{resetSuccess}</Text> : null}
+
+            <Text style={styles.inputLabel}>6-digit code</Text>
+            <TextInput
+              style={[styles.input, styles.codeInput]}
+              placeholder="000000"
+              keyboardType="number-pad"
+              maxLength={6}
+              value={resetCode}
+              onChangeText={setResetCode}
+              placeholderTextColor="#b0a090"
+            />
+
+            {resetError ? <Text style={styles.error}>{resetError}</Text> : null}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.submitButton,
+                pressed ? styles.submitButtonPressed : undefined
+              ]}
+              onPress={handleResetCodeSubmit}
+            >
+              <LinearGradient
+                colors={["#ff8b2b", "#ff5a1f"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.submitGradient}
+              >
+                <Text style={styles.submitText}>verify code</Text>
+              </LinearGradient>
+            </Pressable>
+
+            <Pressable
+              style={styles.forgotLink}
+              onPress={() => {
+                triggerSelectionHaptic();
+                setResetError(null);
+                setResetSuccess(null);
+                onModeChange("forgot");
+              }}
+            >
+              <Text style={styles.forgotLinkText}>resend code</Text>
+            </Pressable>
+          </>
+        ) : null}
+
+        {/* Reset password — enter new password */}
+        {isResetPassword ? (
+          <>
+            <Text style={styles.inputLabel}>new password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="at least 8 characters"
+              secureTextEntry
+              autoCapitalize="none"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              editable={!resetLoading}
+              placeholderTextColor="#b0a090"
+            />
+
+            {resetError ? <Text style={styles.error}>{resetError}</Text> : null}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.submitButton,
+                resetLoading ? styles.submitButtonLoading : undefined,
+                pressed && !resetLoading ? styles.submitButtonPressed : undefined
+              ]}
+              onPress={handleResetPasswordSubmit}
+              disabled={resetLoading}
+            >
+              <LinearGradient
+                colors={resetLoading ? ["#c9a07a", "#b8906a"] : ["#ff8b2b", "#ff5a1f"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.submitGradient}
+              >
+                <Text style={styles.submitText}>{resetLoading ? "resetting..." : "set new password"}</Text>
+              </LinearGradient>
+            </Pressable>
           </>
         ) : null}
       </GlassSurface>
@@ -330,10 +565,24 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontFamily: theme.typography.body
   },
+  codeInput: {
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 8,
+    textAlign: "center",
+    fontFamily: theme.typography.heading
+  },
   error: {
     marginTop: 12,
     color: theme.colors.danger,
     fontWeight: "700"
+  },
+  successText: {
+    marginBottom: 12,
+    color: "#2d8a4e",
+    fontWeight: "700",
+    fontSize: 14,
+    fontFamily: theme.typography.body
   },
   submitButton: {
     marginTop: 18,
@@ -368,6 +617,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.15,
     fontFamily: theme.typography.heading
+  },
+  forgotLink: {
+    marginTop: 14,
+    alignItems: "center",
+    paddingVertical: 6
+  },
+  forgotLinkText: {
+    color: theme.colors.textSecondary,
+    fontSize: 14,
+    fontWeight: "600",
+    fontFamily: theme.typography.body
   },
   dividerRow: {
     flexDirection: "row",
